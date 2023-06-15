@@ -1,0 +1,269 @@
+From 8e7d85a0d761a67d4b543658de47d299d52304d9 Mon Sep 17 00:00:00 2001
+From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
+Date: Thu, 3 Jun 2021 11:15:46 +0200
+Subject: [PATCH] UPSTREAM: <carry>: apiserver: add
+ system_client=kube-{apiserver,cm,s} to apiserver_request_total
+
+UPSTREAM: <carry>: apiserver: add cluster-policy-controller to system client in apiserver_request_total
+
+OpenShift-Rebase-Source: d86823df643
+
+UPSTREAM: <carry>: apiserver: add system_client=kube-{apiserver,cm,s} to apiserver_request_total
+
+Fix TestOpenAPIRequestMetrics unit test.
+---
+ .../pkg/endpoints/metrics/metrics.go          | 24 ++++++++++++-------
+ .../pkg/endpoints/metrics/metrics_test.go     |  6 ++---
+ .../pkg/server/healthz/healthz_test.go        |  6 ++---
+ .../openapiv3/aggregator/aggregator_test.go   |  6 ++---
+ .../testdata/stable-metrics-list.yaml         |  1 +
+ test/integration/metrics/metrics_test.go      | 24 +++++++++----------
+ 6 files changed, 37 insertions(+), 30 deletions(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
+index 450a6653da6..640651e5da0 100644
+--- a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
++++ b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
+@@ -30,7 +30,6 @@ import (
+ 	"k8s.io/apimachinery/pkg/types"
+ 	utilsets "k8s.io/apimachinery/pkg/util/sets"
+ 	"k8s.io/apiserver/pkg/audit"
+-	"k8s.io/apiserver/pkg/authentication/user"
+ 	"k8s.io/apiserver/pkg/endpoints/request"
+ 	"k8s.io/apiserver/pkg/endpoints/responsewriter"
+ 	compbasemetrics "k8s.io/component-base/metrics"
+@@ -77,7 +76,7 @@ var (
+ 			Help:           "Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.",
+ 			StabilityLevel: compbasemetrics.STABLE,
+ 		},
+-		[]string{"verb", "dry_run", "group", "version", "resource", "subresource", "scope", "component", "code"},
++		[]string{"verb", "dry_run", "group", "version", "resource", "subresource", "scope", "component", "code", "system_client"},
+ 	)
+ 	longRunningRequestsGauge = compbasemetrics.NewGaugeVec(
+ 		&compbasemetrics.GaugeOpts{
+@@ -457,9 +456,9 @@ func RecordDroppedRequest(req *http.Request, requestInfo *request.RequestInfo, c
+ 	reportedVerb := cleanVerb(CanonicalVerb(strings.ToUpper(req.Method), scope), "", req, requestInfo)
+ 
+ 	if requestInfo.IsResourceRequest {
+-		requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, requestInfo.APIGroup, requestInfo.APIVersion, requestInfo.Resource, requestInfo.Subresource, scope, component, codeToString(http.StatusTooManyRequests)).Inc()
++		requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, requestInfo.APIGroup, requestInfo.APIVersion, requestInfo.Resource, requestInfo.Subresource, scope, component, codeToString(http.StatusTooManyRequests), "").Inc()
+ 	} else {
+-		requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, "", "", "", requestInfo.Subresource, scope, component, codeToString(http.StatusTooManyRequests)).Inc()
++		requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, "", "", "", requestInfo.Subresource, scope, component, codeToString(http.StatusTooManyRequests), "").Inc()
+ 	}
+ }
+ 
+@@ -526,12 +525,19 @@ func MonitorRequest(req *http.Request, verb, group, version, resource, subresour
+ 
+ 	dryRun := cleanDryRun(req.URL)
+ 	elapsedSeconds := elapsed.Seconds()
+-	requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, group, version, resource, subresource, scope, component, codeToString(httpCode)).Inc()
+-	// MonitorRequest happens after authentication, so we can trust the username given by the request
+-	info, ok := request.UserFrom(req.Context())
+-	if ok && info.GetName() == user.APIServerUser {
+-		apiSelfRequestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, resource, subresource).Inc()
++
++	systemClient := ""
++	if uas := strings.SplitN(req.UserAgent(), "/", 2); len(uas) > 1 {
++		switch uas[0] {
++		case "kube-apiserver":
++			apiSelfRequestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, resource, subresource).Inc()
++			fallthrough
++		case "kube-controller-manager", "kube-scheduler", "cluster-policy-controller":
++			systemClient = uas[0]
++		}
+ 	}
++	requestCounter.WithContext(req.Context()).WithLabelValues(reportedVerb, dryRun, group, version, resource, subresource, scope, component, codeToString(httpCode), systemClient).Inc()
++
+ 	if deprecated {
+ 		deprecatedRequestGauge.WithContext(req.Context()).WithLabelValues(group, version, resource, subresource, removedRelease).Set(1)
+ 		audit.AddAuditAnnotation(req.Context(), deprecatedAnnotationKey, "true")
+diff --git a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics_test.go b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics_test.go
+index 562230f2137..f4e258fd555 100644
+--- a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics_test.go
++++ b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics_test.go
+@@ -395,7 +395,7 @@ func TestRecordDroppedRequests(t *testing.T) {
+ 			want: `
+ 			            # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+ 			            # TYPE apiserver_request_total counter
+-			            apiserver_request_total{code="429",component="apiserver",dry_run="",group="",resource="pods",scope="cluster",subresource="",verb="LIST",version="v1"} 1
++			            apiserver_request_total{code="429",component="apiserver",dry_run="",group="",resource="pods",scope="cluster",subresource="",system_client="",verb="LIST",version="v1"} 1
+ 				`,
+ 		},
+ 		{
+@@ -417,7 +417,7 @@ func TestRecordDroppedRequests(t *testing.T) {
+ 			want: `
+ 			            # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+ 			            # TYPE apiserver_request_total counter
+-			            apiserver_request_total{code="429",component="apiserver",dry_run="",group="",resource="pods",scope="resource",subresource="",verb="POST",version="v1"} 1
++			            apiserver_request_total{code="429",component="apiserver",dry_run="",group="",resource="pods",scope="resource",subresource="",system_client="",verb="POST",version="v1"} 1
+ 				`,
+ 		},
+ 		{
+@@ -442,7 +442,7 @@ func TestRecordDroppedRequests(t *testing.T) {
+ 			want: `
+ 			            # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+ 			            # TYPE apiserver_request_total counter
+-			            apiserver_request_total{code="429",component="apiserver",dry_run="All",group="batch",resource="jobs",scope="resource",subresource="status",verb="PATCH",version="v1"} 1
++			            apiserver_request_total{code="429",component="apiserver",dry_run="All",group="batch",resource="jobs",scope="resource",subresource="status",system_client="",verb="PATCH",version="v1"} 1
+ 				`,
+ 		},
+ 	}
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/healthz/healthz_test.go b/staging/src/k8s.io/apiserver/pkg/server/healthz/healthz_test.go
+index 89937987e2c..cc52cbaf292 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/healthz/healthz_test.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/healthz/healthz_test.go
+@@ -255,9 +255,9 @@ func TestMetrics(t *testing.T) {
+ 	expected := strings.NewReader(`
+         # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+         # TYPE apiserver_request_total counter
+-        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/healthz",verb="GET",version=""} 1
+-        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/livez",verb="GET",version=""} 1
+-        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/readyz",verb="GET",version=""} 1
++        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/healthz",system_client="",verb="GET",version=""} 1
++        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/livez",system_client="",verb="GET",version=""} 1
++        apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="/readyz",system_client="",verb="GET",version=""} 1
+ `)
+ 	if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, expected, "apiserver_request_total"); err != nil {
+ 		t.Error(err)
+diff --git a/staging/src/k8s.io/kube-aggregator/pkg/controllers/openapiv3/aggregator/aggregator_test.go b/staging/src/k8s.io/kube-aggregator/pkg/controllers/openapiv3/aggregator/aggregator_test.go
+index 69b3caf392f..c6fa38e69a3 100644
+--- a/staging/src/k8s.io/kube-aggregator/pkg/controllers/openapiv3/aggregator/aggregator_test.go
++++ b/staging/src/k8s.io/kube-aggregator/pkg/controllers/openapiv3/aggregator/aggregator_test.go
+@@ -211,7 +211,7 @@ func TestOpenAPIRequestMetrics(t *testing.T) {
+ 	if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(`
+ # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+ # TYPE apiserver_request_total counter
+-apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3",verb="GET",version=""} 1
++apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3",system_client="",verb="GET",version=""} 1
+ `), "apiserver_request_total"); err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -222,8 +222,8 @@ apiserver_request_total{code="200",component="",dry_run="",group="",resource="",
+ 	if err := testutil.GatherAndCompare(legacyregistry.DefaultGatherer, strings.NewReader(`
+ # HELP apiserver_request_total [STABLE] Counter of apiserver requests broken out for each verb, dry run value, group, version, resource, scope, component, and HTTP response code.
+ # TYPE apiserver_request_total counter
+-apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3",verb="GET",version=""} 1
+-apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3/",verb="GET",version=""} 1
++apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3",system_client="",verb="GET",version=""} 1
++apiserver_request_total{code="200",component="",dry_run="",group="",resource="",scope="",subresource="openapi/v3/",system_client="",verb="GET",version=""} 1
+ `), "apiserver_request_total"); err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/test/instrumentation/testdata/stable-metrics-list.yaml b/test/instrumentation/testdata/stable-metrics-list.yaml
+index bf911947898..09a87a24b3d 100644
+--- a/test/instrumentation/testdata/stable-metrics-list.yaml
++++ b/test/instrumentation/testdata/stable-metrics-list.yaml
+@@ -367,6 +367,7 @@
+   - resource
+   - scope
+   - subresource
++  - system_client
+   - verb
+   - version
+ - name: requested_deprecated_apis
+diff --git a/test/integration/metrics/metrics_test.go b/test/integration/metrics/metrics_test.go
+index d91147f203a..5324b44555f 100644
+--- a/test/integration/metrics/metrics_test.go
++++ b/test/integration/metrics/metrics_test.go
+@@ -282,42 +282,42 @@ func TestAPIServerMetricsPods(t *testing.T) {
+ 			executor: func() {
+ 				callOrDie(c.Create(context.TODO(), makePod("foo"), metav1.CreateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="201", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", verb="POST", version="v1"}`,
++			want: `apiserver_request_total{code="201", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", system_client="", verb="POST", version="v1"}`,
+ 		},
+ 		{
+ 			name: "update pod",
+ 			executor: func() {
+ 				callOrDie(c.Update(context.TODO(), makePod("bar"), metav1.UpdateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", verb="PUT", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", system_client="", verb="PUT", version="v1"}`,
+ 		},
+ 		{
+ 			name: "update pod status",
+ 			executor: func() {
+ 				callOrDie(c.UpdateStatus(context.TODO(), makePod("bar"), metav1.UpdateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="status", verb="PUT", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="status", system_client="", verb="PUT", version="v1"}`,
+ 		},
+ 		{
+ 			name: "get pod",
+ 			executor: func() {
+ 				callOrDie(c.Get(context.TODO(), "foo", metav1.GetOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", verb="GET", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", system_client="", verb="GET", version="v1"}`,
+ 		},
+ 		{
+ 			name: "list pod",
+ 			executor: func() {
+ 				callOrDie(c.List(context.TODO(), metav1.ListOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="namespace", subresource="", verb="LIST", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="namespace", subresource="", system_client="", verb="LIST", version="v1"}`,
+ 		},
+ 		{
+ 			name: "delete pod",
+ 			executor: func() {
+ 				callOrDie(nil, c.Delete(context.TODO(), "foo", metav1.DeleteOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", verb="DELETE", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="pods", scope="resource", subresource="", system_client="", verb="DELETE", version="v1"}`,
+ 		},
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
+@@ -390,42 +390,42 @@ func TestAPIServerMetricsNamespaces(t *testing.T) {
+ 			executor: func() {
+ 				callOrDie(c.Create(context.TODO(), makeNamespace("foo"), metav1.CreateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="201", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", verb="POST", version="v1"}`,
++			want: `apiserver_request_total{code="201", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", system_client="", verb="POST", version="v1"}`,
+ 		},
+ 		{
+ 			name: "update namespace",
+ 			executor: func() {
+ 				callOrDie(c.Update(context.TODO(), makeNamespace("bar"), metav1.UpdateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", verb="PUT", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", system_client="", verb="PUT", version="v1"}`,
+ 		},
+ 		{
+ 			name: "update namespace status",
+ 			executor: func() {
+ 				callOrDie(c.UpdateStatus(context.TODO(), makeNamespace("bar"), metav1.UpdateOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="status", verb="PUT", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="status", system_client="", verb="PUT", version="v1"}`,
+ 		},
+ 		{
+ 			name: "get namespace",
+ 			executor: func() {
+ 				callOrDie(c.Get(context.TODO(), "foo", metav1.GetOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", verb="GET", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", system_client="", verb="GET", version="v1"}`,
+ 		},
+ 		{
+ 			name: "list namespace",
+ 			executor: func() {
+ 				callOrDie(c.List(context.TODO(), metav1.ListOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="cluster", subresource="", verb="LIST", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="cluster", subresource="", system_client="", verb="LIST", version="v1"}`,
+ 		},
+ 		{
+ 			name: "delete namespace",
+ 			executor: func() {
+ 				callOrDie(nil, c.Delete(context.TODO(), "foo", metav1.DeleteOptions{}))
+ 			},
+-			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", verb="DELETE", version="v1"}`,
++			want: `apiserver_request_total{code="200", component="apiserver", dry_run="", group="", resource="namespaces", scope="resource", subresource="", system_client="", verb="DELETE", version="v1"}`,
+ 		},
+ 	} {
+ 		t.Run(tc.name, func(t *testing.T) {
+-- 
+2.40.1
+

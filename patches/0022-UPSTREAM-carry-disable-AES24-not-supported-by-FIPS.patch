@@ -1,0 +1,46 @@
+From 67a15793b3dadd8f285c38741e976b639a575e15 Mon Sep 17 00:00:00 2001
+From: Ryan Phillips <rphillips@redhat.com>
+Date: Thu, 29 Oct 2020 13:55:58 +0100
+Subject: [PATCH] UPSTREAM: <carry>: disable AES24, not supported by FIPS
+
+OpenShift-Rebase-Source: b9a8eb651bd
+---
+ .../pkg/storage/value/encrypt/aes/aes_test.go          | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/aes/aes_test.go b/staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/aes/aes_test.go
+index 87132397611..f597994fdbe 100644
+--- a/staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/aes/aes_test.go
++++ b/staging/src/k8s.io/apiserver/pkg/storage/value/encrypt/aes/aes_test.go
+@@ -653,11 +653,13 @@ func TestRoundTrip(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	aes24block, err := aes.NewCipher(bytes.Repeat([]byte("b"), 24))
++	/* FIPS disabled
++	aes24block, err := aes.NewCipher([]byte(bytes.Repeat([]byte("b"), 24)))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	aes32block, err := aes.NewCipher(bytes.Repeat([]byte("c"), 32))
++	*/
++	aes32block, err := aes.NewCipher([]byte(bytes.Repeat([]byte("c"), 32)))
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -669,10 +671,10 @@ func TestRoundTrip(t *testing.T) {
+ 		t       value.Transformer
+ 	}{
+ 		{name: "GCM 16 byte key", t: newGCMTransformer(t, aes16block)},
+-		{name: "GCM 24 byte key", t: newGCMTransformer(t, aes24block)},
++		// FIPS disabled {name: "GCM 24 byte key", t: newGCMTransformer(t, aes24block)},
+ 		{name: "GCM 32 byte key", t: newGCMTransformer(t, aes32block)},
+ 		{name: "GCM 16 byte unsafe key", t: newGCMTransformerWithUniqueKeyUnsafeTest(t, aes16block)},
+-		{name: "GCM 24 byte unsafe key", t: newGCMTransformerWithUniqueKeyUnsafeTest(t, aes24block)},
++		// FIPS disabled {name: "GCM 24 byte unsafe key", t: newGCMTransformerWithUniqueKeyUnsafeTest(t, aes24block)},
+ 		{name: "GCM 32 byte unsafe key", t: newGCMTransformerWithUniqueKeyUnsafeTest(t, aes32block)},
+ 		{name: "CBC 32 byte key", t: NewCBCTransformer(aes32block)},
+ 	}
+-- 
+2.40.1
+

@@ -1,0 +1,47 @@
+From 82645308ce2cd6884367033fd5e0c3fd8d954366 Mon Sep 17 00:00:00 2001
+From: Dan Winship <danwinship@redhat.com>
+Date: Mon, 23 Aug 2021 10:24:39 -0400
+Subject: [PATCH] UPSTREAM: <carry>: Revert "Remove Endpoints write access from
+ aggregated edit role"
+
+OpenShift has an admission controller to prevent restricted Endpoints
+changes, and there's no reason to block non-restricted changes (such
+as modifying the annotations of an Endpoints, which is done by "oc
+idle").
+
+This reverts commit 416efdab26afe06cf2b57991dfac511769bf508b.
+
+OpenShift-Rebase-Source: 239b9edabbb
+---
+ plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go       | 2 +-
+ .../authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml | 1 +
+ 2 files changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
+index 4a3392121a5..9f78236e944 100644
+--- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
++++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
+@@ -310,7 +310,7 @@ func clusterRoles() []rbacv1.ClusterRole {
+ 				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("pods", "pods/attach", "pods/proxy", "pods/exec", "pods/portforward").RuleOrDie(),
+ 				rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("pods/eviction").RuleOrDie(),
+ 				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("replicationcontrollers", "replicationcontrollers/scale", "serviceaccounts",
+-					"services", "services/proxy", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
++					"services", "services/proxy", "endpoints", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
+ 				rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("serviceaccounts/token").RuleOrDie(),
+ 
+ 				rbacv1helpers.NewRule(Write...).Groups(appsGroup).Resources(
+diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
+index bbc79842599..def98dca234 100644
+--- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
++++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
+@@ -134,6 +134,7 @@ items:
+     - ""
+     resources:
+     - configmaps
++    - endpoints
+     - events
+     - persistentvolumeclaims
+     - replicationcontrollers
+-- 
+2.40.1
+

@@ -1,0 +1,207 @@
+From e64e476ab259f104692f8dbd61b51921726a53b5 Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Mon, 17 Oct 2022 17:33:34 -0400
+Subject: [PATCH] UPSTREAM: <carry>: make the PSA workload admission warnings
+ honor the changes that SCC will eventually make to the pod
+
+UPSTREAM: <carry>: pod-security: don't fail on SCC admission error
+
+If we propagate SCC admission error during pod extraction to PodSecurity
+admission, the latter will log the error instead of continuing with
+unmutated pod spec, and so we will not get a validation error in
+either the audit logs or as a warning.
+
+OpenShift-Rebase-Source: 6fe5c8f28c2
+OpenShift-Rebase-Source: b4e019f9bb9
+
+UPSTREAM: <carry>: SCC pod extractor: assume default SA if SA is empty
+---
+ .../enablement/intialization.go               |   7 ++
+ .../openshiftkubeapiserver/patch.go           |   6 +
+ .../security/podsecurity/admission.go         |   2 +-
+ .../podsecurity/patch_podspecextractor.go     | 111 ++++++++++++++++++
+ 4 files changed, 125 insertions(+), 1 deletion(-)
+ create mode 100644 plugin/pkg/admission/security/podsecurity/patch_podspecextractor.go
+
+diff --git a/openshift-kube-apiserver/enablement/intialization.go b/openshift-kube-apiserver/enablement/intialization.go
+index a2421c627d6..52794bec4b6 100644
+--- a/openshift-kube-apiserver/enablement/intialization.go
++++ b/openshift-kube-apiserver/enablement/intialization.go
+@@ -4,9 +4,12 @@ import (
+ 	"io/ioutil"
+ 	"path"
+ 
++	"k8s.io/kubernetes/plugin/pkg/admission/security/podsecurity"
++
+ 	configv1 "github.com/openshift/api/config/v1"
+ 	kubecontrolplanev1 "github.com/openshift/api/kubecontrolplane/v1"
+ 	osinv1 "github.com/openshift/api/osin/v1"
++	"github.com/openshift/apiserver-library-go/pkg/securitycontextconstraints/sccadmission"
+ 	"github.com/openshift/library-go/pkg/config/helpers"
+ 	"k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/apimachinery/pkg/runtime/schema"
+@@ -74,6 +77,8 @@ func ForceGlobalInitializationForOpenShift() {
+ 		},
+ 	})
+ 
++	podsecurity.SCCMutatingPodSpecExtractorInstance.SetSCCAdmission(SCCAdmissionPlugin)
++
+ 	// add permissions we require on our kube-apiserver
+ 	// TODO, we should scrub these out
+ 	bootstrappolicy.ClusterRoles = bootstrappolicy.OpenshiftClusterRoles
+@@ -83,3 +88,5 @@ func ForceGlobalInitializationForOpenShift() {
+ 	// SkipSystemMastersAuthorizer disable implicitly added system/master authz, and turn it into another authz mode "SystemMasters", to be added via authorization-mode
+ 	authorizer.SkipSystemMastersAuthorizer()
+ }
++
++var SCCAdmissionPlugin = sccadmission.NewConstraint()
+diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+index ede552e7445..45baad88b8f 100644
+--- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
++++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+@@ -80,6 +80,12 @@ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, k
+ 		managementcpusoverride.NewInitializer(openshiftInformers.getOpenshiftInfraInformers().Config().V1().Infrastructures()),
+ 		managednode.NewInitializer(openshiftInformers.getOpenshiftInfraInformers().Config().V1().Infrastructures()),
+ 	)
++
++	// This is needed in order to have the correct initializers for the SCC admission plugin which is used to mutate
++	// PodSpecs for PodSpec-y workload objects in the pod security admission plugin.
++	enablement.SCCAdmissionPlugin.SetAuthorizer(genericConfig.Authorization.Authorizer)
++	enablement.SCCAdmissionPlugin.SetSecurityInformers(openshiftInformers.getOpenshiftSecurityInformers().Security().V1().SecurityContextConstraints())
++	enablement.SCCAdmissionPlugin.SetExternalKubeInformerFactory(kubeInformers)
+ 	// END ADMISSION
+ 
+ 	// HANDLER CHAIN (with oauth server and web console)
+diff --git a/plugin/pkg/admission/security/podsecurity/admission.go b/plugin/pkg/admission/security/podsecurity/admission.go
+index 2e99f11b6bb..fa90bb9fbf7 100644
+--- a/plugin/pkg/admission/security/podsecurity/admission.go
++++ b/plugin/pkg/admission/security/podsecurity/admission.go
+@@ -114,7 +114,7 @@ func newPlugin(reader io.Reader) (*Plugin, error) {
+ 			Configuration:    config,
+ 			Evaluator:        evaluator,
+ 			Metrics:          getDefaultRecorder(),
+-			PodSpecExtractor: podsecurityadmission.DefaultPodSpecExtractor{},
++			PodSpecExtractor: SCCMutatingPodSpecExtractorInstance,
+ 		},
+ 	}, nil
+ }
+diff --git a/plugin/pkg/admission/security/podsecurity/patch_podspecextractor.go b/plugin/pkg/admission/security/podsecurity/patch_podspecextractor.go
+new file mode 100644
+index 00000000000..fb8b8488a6e
+--- /dev/null
++++ b/plugin/pkg/admission/security/podsecurity/patch_podspecextractor.go
+@@ -0,0 +1,111 @@
++package podsecurity
++
++import (
++	"context"
++	"fmt"
++
++	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
++
++	corev1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/api/meta"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/authentication/serviceaccount"
++	"k8s.io/apiserver/pkg/authentication/user"
++	"k8s.io/klog/v2"
++	"k8s.io/kubernetes/pkg/apis/core"
++	v1 "k8s.io/kubernetes/pkg/apis/core/v1"
++	saadmission "k8s.io/kubernetes/plugin/pkg/admission/serviceaccount"
++	podsecurityadmission "k8s.io/pod-security-admission/admission"
++)
++
++type SCCMutatingPodSpecExtractor struct {
++	sccAdmission admission.MutationInterface
++	delegate     podsecurityadmission.PodSpecExtractor
++}
++
++var SCCMutatingPodSpecExtractorInstance = &SCCMutatingPodSpecExtractor{
++	delegate: podsecurityadmission.DefaultPodSpecExtractor{},
++}
++
++func (s *SCCMutatingPodSpecExtractor) SetSCCAdmission(sccAdmission admission.MutationInterface) {
++	s.sccAdmission = sccAdmission
++}
++
++func (s *SCCMutatingPodSpecExtractor) HasPodSpec(gr schema.GroupResource) bool {
++	return s.delegate.HasPodSpec(gr)
++}
++
++func (s *SCCMutatingPodSpecExtractor) ExtractPodSpec(obj runtime.Object) (*metav1.ObjectMeta, *corev1.PodSpec, error) {
++	if s.sccAdmission == nil {
++		return s.delegate.ExtractPodSpec(obj)
++	}
++
++	switch obj := obj.(type) {
++	case *corev1.Pod:
++		return s.delegate.ExtractPodSpec(obj)
++	}
++
++	podTemplateMeta, originalPodSpec, err := s.delegate.ExtractPodSpec(obj)
++	if err != nil {
++		return podTemplateMeta, originalPodSpec, err
++	}
++	if originalPodSpec == nil {
++		return nil, nil, nil
++	}
++	objectMeta, err := meta.Accessor(obj)
++	if err != nil {
++		return podTemplateMeta, originalPodSpec, fmt.Errorf("unable to get metadata for SCC mutation: %w", err)
++	}
++
++	pod := &corev1.Pod{
++		ObjectMeta: *podTemplateMeta.DeepCopy(),
++		Spec:       *originalPodSpec.DeepCopy(),
++	}
++	if len(pod.Namespace) == 0 {
++		pod.Namespace = objectMeta.GetNamespace()
++	}
++	if len(pod.Name) == 0 {
++		pod.Name = "pod-for-container-named-" + objectMeta.GetName()
++	}
++	if len(pod.Spec.ServiceAccountName) == 0 {
++		pod.Spec.ServiceAccountName = saadmission.DefaultServiceAccountName
++	}
++	internalPod := &core.Pod{}
++	if err := v1.Convert_v1_Pod_To_core_Pod(pod, internalPod, nil); err != nil {
++		return nil, nil, err
++	}
++
++	admissionAttributes := admission.NewAttributesRecord(
++		internalPod,
++		nil,
++		corev1.SchemeGroupVersion.WithKind("Pod"),
++		pod.Namespace,
++		pod.Name,
++		corev1.SchemeGroupVersion.WithResource("pods"),
++		"",
++		admission.Create,
++		nil,
++		false,
++		&user.DefaultInfo{
++			Name:   serviceaccount.MakeUsername(pod.Namespace, pod.Spec.ServiceAccountName),
++			UID:    "",
++			Groups: append([]string{user.AllAuthenticated}, serviceaccount.MakeGroupNames(pod.Namespace)...),
++			Extra:  nil,
++		})
++	if err := s.sccAdmission.Admit(context.Background(), admissionAttributes, nil); err != nil {
++		// don't fail the request, just warn if SCC will fail
++		klog.ErrorS(err, "failed to mutate object for PSA using SCC")
++		utilruntime.HandleError(fmt.Errorf("failed to mutate object for PSA using SCC: %w", err))
++		// TODO remove this failure we're causing when SCC fails, but for now we actually need to see our test fail because that was almost really bad.
++		return podTemplateMeta, originalPodSpec, nil
++	}
++
++	if err := v1.Convert_core_Pod_To_v1_Pod(internalPod, pod, nil); err != nil {
++		return nil, nil, err
++	}
++
++	return podTemplateMeta, &pod.Spec, nil
++}
+-- 
+2.40.1
+

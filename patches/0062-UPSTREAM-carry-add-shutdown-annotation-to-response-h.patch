@@ -1,0 +1,47 @@
+From 982b988f5db9711100610d374faa374f5f8a7e80 Mon Sep 17 00:00:00 2001
+From: Abu Kashem <akashem@redhat.com>
+Date: Mon, 10 Apr 2023 16:11:27 -0400
+Subject: [PATCH] UPSTREAM: <carry>: add shutdown annotation to response header
+
+If it is useful we will combine this with the following carry:
+20caad91a3f: UPSTREAM: 115328: annotate early and late requests
+---
+ .../pkg/server/filters/with_early_late_annotations.go        | 5 +++--
+ .../pkg/server/filters/with_early_late_annotations_test.go   | 3 +++
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations.go b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations.go
+index 8b7bcc421cc..b2361e6ab77 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations.go
+@@ -119,10 +119,11 @@ func withShutdownLateAnnotation(handler http.Handler, shutdownInitiated lifecycl
+ 			self = fmt.Sprintf("%s%t", self, requestor.GetName() == user.APIServerUser)
+ 		}
+ 
+-		audit.AddAuditAnnotation(req.Context(), "apiserver.k8s.io/shutdown",
+-			fmt.Sprintf("%s %s loopback=%t", late, self, isLoopback(req.RemoteAddr)))
++		message := fmt.Sprintf("%s %s loopback=%t", late, self, isLoopback(req.RemoteAddr))
++		audit.AddAuditAnnotation(req.Context(), "apiserver.k8s.io/shutdown", message)
+ 
+ 		handler.ServeHTTP(w, req)
++		w.Header().Set("X-OpenShift-Shutdown", message)
+ 	})
+ }
+ 
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go
+index d76863fa686..dcbc917d0bc 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go
+@@ -230,6 +230,9 @@ func TestWithShutdownLateAnnotation(t *testing.T) {
+ 					t.Logf("got: %s", valueGot)
+ 					t.Errorf("expected annotation to match, diff: %s", cmp.Diff(test.annotationShouldContain, valueGot))
+ 				}
++				if header := w.Header().Get("X-OpenShift-Shutdown"); !strings.Contains(header, test.annotationShouldContain) {
++					t.Errorf("expected response header to match, diff: %s", cmp.Diff(test.annotationShouldContain, header))
++				}
+ 			}
+ 		})
+ 	}
+-- 
+2.40.1
+

@@ -1,0 +1,194 @@
+From c0ee8342e914ea218821a4f0c6c275f1fa176217 Mon Sep 17 00:00:00 2001
+From: Michal Fojtik <mfojtik@redhat.com>
+Date: Thu, 29 Oct 2020 13:55:55 +0100
+Subject: [PATCH] UPSTREAM: <carry>: patch aggregator to allow delegating
+ resources
+
+UPSTREAM: <carry>: prevent apiservice registration by CRD controller when delegating
+
+UPSTREAM: <carry>: prevent CRD registration from fighting with APIServices
+
+UPSTREAM: <carry>: always delegate namespaced resources
+
+OpenShift-Rebase-Source: d4cd0ba047b
+---
+ .../crdregistration_controller.go             |  5 ++
+ .../pkg/apiserver/apiserver.go                | 40 ++++++++++-----
+ .../pkg/apiserver/handler_proxy.go            |  9 ++++
+ .../apiserver/patch_always_local_delegate.go  | 49 +++++++++++++++++++
+ 4 files changed, 91 insertions(+), 12 deletions(-)
+ create mode 100644 staging/src/k8s.io/kube-aggregator/pkg/apiserver/patch_always_local_delegate.go
+
+diff --git a/pkg/controlplane/controller/crdregistration/crdregistration_controller.go b/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
+index 5ee06f6a745..f8825e069d6 100644
+--- a/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
++++ b/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
+@@ -33,6 +33,7 @@ import (
+ 	"k8s.io/client-go/tools/cache"
+ 	"k8s.io/client-go/util/workqueue"
+ 	v1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
++	"k8s.io/kube-aggregator/pkg/apiserver"
+ )
+ 
+ // AutoAPIServiceRegistration is an interface which callers can re-declare locally and properly cast to for
+@@ -193,6 +194,10 @@ func (c *crdRegistrationController) enqueueCRD(crd *apiextensionsv1.CustomResour
+ func (c *crdRegistrationController) handleVersionUpdate(groupVersion schema.GroupVersion) error {
+ 	apiServiceName := groupVersion.Version + "." + groupVersion.Group
+ 
++	if apiserver.APIServiceAlreadyExists(groupVersion) {
++		return nil
++	}
++
+ 	// check all CRDs.  There shouldn't that many, but if we have problems later we can index them
+ 	crds, err := c.crdLister.List(labels.Everything())
+ 	if err != nil {
+diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
+index 4c83d8474b9..22ba4a3410f 100644
+--- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
++++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
+@@ -140,6 +140,9 @@ type APIAggregator struct {
+ 	// handledGroups are the groups that already have routes
+ 	handledGroups sets.String
+ 
++	// handledAlwaysLocalDelegatePaths are the URL paths that already have routes registered
++	handledAlwaysLocalDelegatePaths sets.String
++
+ 	// lister is used to add group handling for /apis/<group> aggregator lookups based on
+ 	// controller state
+ 	lister listers.APIServiceLister
+@@ -224,18 +227,19 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+ 	}
+ 
+ 	s := &APIAggregator{
+-		GenericAPIServer:           genericServer,
+-		delegateHandler:            delegationTarget.UnprotectedHandler(),
+-		proxyTransportDial:         proxyTransportDial,
+-		proxyHandlers:              map[string]*proxyHandler{},
+-		handledGroups:              sets.String{},
+-		lister:                     informerFactory.Apiregistration().V1().APIServices().Lister(),
+-		APIRegistrationInformers:   informerFactory,
+-		serviceResolver:            c.ExtraConfig.ServiceResolver,
+-		openAPIConfig:              c.GenericConfig.OpenAPIConfig,
+-		openAPIV3Config:            c.GenericConfig.OpenAPIV3Config,
+-		proxyCurrentCertKeyContent: func() (bytes []byte, bytes2 []byte) { return nil, nil },
+-		rejectForwardingRedirects:  c.ExtraConfig.RejectForwardingRedirects,
++		GenericAPIServer:                genericServer,
++		delegateHandler:                 delegationTarget.UnprotectedHandler(),
++		proxyTransportDial:              proxyTransportDial,
++		proxyHandlers:                   map[string]*proxyHandler{},
++		handledGroups:                   sets.String{},
++		handledAlwaysLocalDelegatePaths: sets.String{},
++		lister:                          informerFactory.Apiregistration().V1().APIServices().Lister(),
++		APIRegistrationInformers:        informerFactory,
++		serviceResolver:                 c.ExtraConfig.ServiceResolver,
++		openAPIConfig:                   c.GenericConfig.OpenAPIConfig,
++		openAPIV3Config:                 c.GenericConfig.OpenAPIV3Config,
++		proxyCurrentCertKeyContent:      func() (bytes []byte, bytes2 []byte) { return nil, nil },
++		rejectForwardingRedirects:       c.ExtraConfig.RejectForwardingRedirects,
+ 	}
+ 
+ 	// used later  to filter the served resource by those that have expired.
+@@ -553,6 +557,18 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
+ 		return nil
+ 	}
+ 
++	// For some resources we always want to delegate to local API server.
++	// These resources have to exists as CRD to be served locally.
++	for _, alwaysLocalDelegatePath := range alwaysLocalDelegatePathPrefixes.List() {
++		if s.handledAlwaysLocalDelegatePaths.Has(alwaysLocalDelegatePath) {
++			continue
++		}
++		s.GenericAPIServer.Handler.NonGoRestfulMux.Handle(alwaysLocalDelegatePath, proxyHandler.localDelegate)
++		// Always use local delegate for this prefix
++		s.GenericAPIServer.Handler.NonGoRestfulMux.UnlistedHandlePrefix(alwaysLocalDelegatePath+"/", proxyHandler.localDelegate)
++		s.handledAlwaysLocalDelegatePaths.Insert(alwaysLocalDelegatePath)
++	}
++
+ 	// it's time to register the group aggregation endpoint
+ 	groupPath := "/apis/" + apiService.Spec.Group
+ 	groupDiscoveryHandler := &apiGroupHandler{
+diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
+index 68b81cb7572..3d7dae0d239 100644
+--- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
++++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
+@@ -25,6 +25,7 @@ import (
+ 	"time"
+ 
+ 	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/runtime/schema"
+ 	"k8s.io/apimachinery/pkg/util/httpstream"
+ 	utilnet "k8s.io/apimachinery/pkg/util/net"
+ 	"k8s.io/apimachinery/pkg/util/proxy"
+@@ -120,6 +121,14 @@ func (r *proxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+ 		return
+ 	}
+ 
++	// some groupResources should always be delegated
++	if requestInfo, ok := genericapirequest.RequestInfoFrom(req.Context()); ok {
++		if alwaysLocalDelegateGroupResource[schema.GroupResource{Group: requestInfo.APIGroup, Resource: requestInfo.Resource}] {
++			r.localDelegate.ServeHTTP(w, req)
++			return
++		}
++	}
++
+ 	if !handlingInfo.serviceAvailable {
+ 		proxyError(w, req, "service unavailable", http.StatusServiceUnavailable)
+ 		return
+diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/patch_always_local_delegate.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/patch_always_local_delegate.go
+new file mode 100644
+index 00000000000..f7169c0d1ab
+--- /dev/null
++++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/patch_always_local_delegate.go
+@@ -0,0 +1,49 @@
++package apiserver
++
++import (
++	"fmt"
++	"strings"
++
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/util/sets"
++)
++
++// alwaysLocalDelegatePrefixes specify a list of API paths that we want to delegate to Kubernetes API server
++// instead of handling with OpenShift API server.
++var alwaysLocalDelegatePathPrefixes = sets.NewString()
++
++// AddAlwaysLocalDelegateForPrefix will cause the given URL prefix always be served by local API server (kube apiserver).
++// This allows to move some resources from aggregated API server into CRD.
++func AddAlwaysLocalDelegateForPrefix(prefix string) {
++	if alwaysLocalDelegatePathPrefixes.Has(prefix) {
++		return
++	}
++	alwaysLocalDelegatePathPrefixes.Insert(prefix)
++}
++
++var overlappingGroupVersion = map[schema.GroupVersion]bool{}
++
++// AddOverlappingGroupVersion will stop the CRD registration controller from trying to manage an APIService.
++func AddOverlappingGroupVersion(groupVersion schema.GroupVersion) {
++	overlappingGroupVersion[groupVersion] = true
++}
++
++var alwaysLocalDelegateGroupResource = map[schema.GroupResource]bool{}
++
++func AddAlwaysLocalDelegateGroupResource(groupResource schema.GroupResource) {
++	alwaysLocalDelegateGroupResource[groupResource] = true
++}
++
++func APIServiceAlreadyExists(groupVersion schema.GroupVersion) bool {
++	if overlappingGroupVersion[groupVersion] {
++		return true
++	}
++
++	testPrefix := fmt.Sprintf("/apis/%s/%s/", groupVersion.Group, groupVersion.Version)
++	for _, prefix := range alwaysLocalDelegatePathPrefixes.List() {
++		if strings.HasPrefix(prefix, testPrefix) {
++			return true
++		}
++	}
++	return false
++}
+-- 
+2.40.1
+

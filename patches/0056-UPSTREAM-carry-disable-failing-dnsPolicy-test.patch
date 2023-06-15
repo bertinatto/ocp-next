@@ -1,0 +1,30 @@
+From 013e2c16bdcd10c226aca4f9dce4c3849555907a Mon Sep 17 00:00:00 2001
+From: Luis Sanchez <sanchezl@redhat.com>
+Date: Tue, 10 Jan 2023 16:55:18 -0500
+Subject: [PATCH] UPSTREAM: <carry>: disable failing dnsPolicy test
+
+UPSTREAM: <carry>: disable failing dnsPolicy test
+---
+ openshift-hack/e2e/annotate/rules.go | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index 63ff50260d8..1e967029652 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -115,8 +115,10 @@ var (
+ 		},
+ 		// tests that need to be temporarily disabled while the rebase is in progress.
+ 		"[Disabled:RebaseInProgress]": {
+-			`\[sig-network\] Connectivity Pod Lifecycle should be able to connect to other Pod from a terminating Pod`,      // TODO(network): simple test in k8s 1.27, needs investigation
+-			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`,                         // TODO(workloads): alpha feature in k8s 1.27. It's failing with `error: unknown flag: --applyset`. Needs investigation
++			// https://issues.redhat.com/browse/OCPBUGS-12870
++			`DNS HostNetwork should resolve DNS of partial qualified names for services on hostNetwork pods with dnsPolicy`,
++			`\[sig-network\] Connectivity Pod Lifecycle should be able to connect to other Pod from a terminating Pod`, // TODO(network): simple test in k8s 1.27, needs investigation
++			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`,                    // TODO(workloads): alpha feature in k8s 1.27. It's failing with `error: unknown flag: --applyset`. Needs investigation
+ 		},
+ 		// tests that may work, but we don't support them
+ 		"[Disabled:Unsupported]": {
+-- 
+2.40.1
+

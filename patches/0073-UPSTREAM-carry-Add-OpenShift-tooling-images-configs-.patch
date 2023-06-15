@@ -1,0 +1,23 @@
+From c4709af02f5def6a4d36d340fe8d73e0231e3e90 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Tue, 13 Jun 2023 09:34:39 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ openshift-hack/lib/init.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openshift-hack/lib/init.sh b/openshift-hack/lib/init.sh
+index 00321b0ff71..6285225bda0 100755
+--- a/openshift-hack/lib/init.sh
++++ b/openshift-hack/lib/init.sh
+@@ -65,4 +65,4 @@ if [[ -n "${JUNIT_REPORT:-}" ]]; then
+ fi
+ 
+ # Use the go version from the system
+-export FORCE_HOST_GO=1
++# export FORCE_HOST_GO=1
+-- 
+2.40.1
+

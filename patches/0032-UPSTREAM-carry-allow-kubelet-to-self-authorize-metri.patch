@@ -1,0 +1,51 @@
+From c05fe7b0625f1ac086716b083602ff45e5f240cf Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Mon, 1 Mar 2021 16:10:32 -0500
+Subject: [PATCH] UPSTREAM: <carry>: allow kubelet to self-authorize metrics
+ scraping
+
+OpenShift-Rebase-Source: 5ab0f5e909b
+---
+ cmd/kubelet/app/auth.go       |  1 +
+ cmd/kubelet/app/patch_auth.go | 17 +++++++++++++++++
+ 2 files changed, 18 insertions(+)
+ create mode 100644 cmd/kubelet/app/patch_auth.go
+
+diff --git a/cmd/kubelet/app/auth.go b/cmd/kubelet/app/auth.go
+index fcb8afe1946..b53e3b415a7 100644
+--- a/cmd/kubelet/app/auth.go
++++ b/cmd/kubelet/app/auth.go
+@@ -61,6 +61,7 @@ func BuildAuth(nodeName types.NodeName, client clientset.Interface, config kubel
+ 	if err != nil {
+ 		return nil, nil, err
+ 	}
++	authorizer = wrapAuthorizerWithMetricsScraper(authorizer)
+ 
+ 	return server.NewKubeletAuth(authenticator, attributes, authorizer), runAuthenticatorCAReload, nil
+ }
+diff --git a/cmd/kubelet/app/patch_auth.go b/cmd/kubelet/app/patch_auth.go
+new file mode 100644
+index 00000000000..04d860cf5e6
+--- /dev/null
++++ b/cmd/kubelet/app/patch_auth.go
+@@ -0,0 +1,17 @@
++package app
++
++import (
++	"github.com/openshift/library-go/pkg/authorization/hardcodedauthorizer"
++	"k8s.io/apiserver/pkg/authorization/authorizer"
++	"k8s.io/apiserver/pkg/authorization/union"
++)
++
++// wrapAuthorizerWithMetricsScraper add an authorizer to always approver the openshift metrics scraper.
++// This eliminates an unnecessary SAR for scraping metrics and enables metrics gathering when network access
++// to the kube-apiserver is interrupted
++func wrapAuthorizerWithMetricsScraper(authz authorizer.Authorizer) authorizer.Authorizer {
++	return union.New(
++		hardcodedauthorizer.NewHardCodedMetricsAuthorizer(),
++		authz,
++	)
++}
+-- 
+2.40.1
+
