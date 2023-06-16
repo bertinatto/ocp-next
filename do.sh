@@ -5,8 +5,10 @@ set -eo pipefail
 main() {
     local branch_name="$1"
 
-    clone_repos
+    setup_git
+    clone_upstream_repo
     pushd kubernetes || exit 1
+    add_openshift_remote
     create_branch "$branch_name"
     merge_changes
     apply_patches
@@ -18,8 +20,16 @@ main() {
     popd
 }
 
-clone_repos() {
+setup_git() {
+    git config --global user.email "fbertina@redhat.com"
+    git config --global user.name "Fabio Bertinatto"
+}
+
+clone_upstream_repo() {
     git clone --origin upstream "https://github.com/kubernetes/kubernetes.git" || true
+}
+
+add_openshift_remote() {
     git remote add openshift --fetch "https://github.com/openshift/kubernetes.git" || true
 }
 
