@@ -12,8 +12,9 @@ main() {
     apply_patches
     update_dependencies
     update_vendor
-    update_and_build
-    commit_and_push
+    # FIXME
+    # update_and_build
+    # commit_and_push
     popd
 }
 
