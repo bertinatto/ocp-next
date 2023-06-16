@@ -14,8 +14,8 @@ main() {
     apply_patches
     update_dependencies
     update_vendor
+    update_and_build
     # FIXME
-    # update_and_build
     # commit_and_push
     popd
 }
@@ -71,9 +71,7 @@ update_vendor() {
 
 update_and_build() {
     eval "$(hack/install-etcd.sh | grep "export PATH")"
-    # FIXME: this is for local testing
-    sudo PATH="$PATH" make clean
-    sudo PATH="$PATH" make update
+    make clean && make update
 }
 
 commit_and_push() {
