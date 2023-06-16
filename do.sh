@@ -5,8 +5,8 @@ set -eo pipefail
 main() {
     local branch_name="$1"
 
-    pushd kubernetes || exit 1
     clone_repos
+    pushd kubernetes || exit 1
     create_branch "$branch_name"
     merge_changes
     apply_patches
