@@ -38,18 +38,6 @@ To implement this proposal, the following steps are required:
 
 ### Watcher
 
-For each release, we will designate a watcher to participate in the
-process. Ideally it should be the same person that will execute the
-rebase.
-
-A watcher is someone who makes sure the remaining steps outlined below
-are being executed without errors.
-
-Some manual work is required, but it shouldn't take they full daily
-working time.
-
-### Watcher
-
 For each OCP release, we will designate a watcher to participate in
 the process. Ideally, it should be the same person who will execute
 the final rebase.
