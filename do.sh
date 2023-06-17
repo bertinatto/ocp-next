@@ -14,8 +14,8 @@ main() {
     apply_patches
     update_dependencies
     update_vendor
-    update_and_build
-    # FIXME
+    # FIXME: figure out how to install "make" and set up git credentials
+    # update_and_build
     # commit_and_push
     popd
 }
