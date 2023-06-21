@@ -1,4 +1,4 @@
-From 37465241c07a093698d5cf2c08c91d7e117f8745 Mon Sep 17 00:00:00 2001
+From 05541f07e7cfbdad6af86ee751c38aef8a39fb6e Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Tue, 24 Aug 2021 15:13:04 +0200
 Subject: [PATCH] UPSTREAM: <carry>: skip posting failures to aggregated APIs
@@ -23,14 +23,14 @@ OpenShift-Rebase-Source: 8558e889333
  .../src/k8s.io/apiserver/pkg/server/config.go |  5 +++++
  .../pkg/apiserver/apiserver.go                |  1 +
  .../status/available_controller.go            | 22 +++++++++++++++++++
- .../status/available_controller_test.go       |  7 +++++-
- 4 files changed, 34 insertions(+), 1 deletion(-)
+ .../status/available_controller_test.go       |  8 ++++++-
+ 4 files changed, 35 insertions(+), 1 deletion(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index bb11f22ec67..6310318b49d 100644
+index d83828d42c5..acf031c1901 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -606,6 +606,11 @@ func (c *Config) DrainedNotify() <-chan struct{} {
+@@ -618,6 +618,11 @@ func (c *Config) DrainedNotify() <-chan struct{} {
  	return c.lifecycleSignals.InFlightRequestsDrained.Signaled()
  }
  
@@ -43,10 +43,10 @@ index bb11f22ec67..6310318b49d 100644
  // from other fields. If you're going to `ApplyOptions`, do that first. It's mutating the receiver.
  func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedConfig {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index cf83c3a6fe5..1a5c65fbb66 100644
+index 22ba4a3410f..8f9d46a0d4e 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-@@ -306,6 +306,7 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+@@ -314,6 +314,7 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
  		proxyTransportDial,
  		(func() ([]byte, []byte))(s.proxyCurrentCertKeyContent),
  		s.serviceResolver,
@@ -116,7 +116,7 @@ index 6277a81a4af..27c6cabe956 100644
  			availableCondition.Reason = "FailedDiscoveryCheck"
  			availableCondition.Message = lastError.Error()
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/controllers/status/available_controller_test.go b/staging/src/k8s.io/kube-aggregator/pkg/controllers/status/available_controller_test.go
-index dc9fbdd3541..895f8791f06 100644
+index dc9fbdd3541..a4ff8b1f062 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/controllers/status/available_controller_test.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/controllers/status/available_controller_test.go
 @@ -119,6 +119,8 @@ func setupAPIServices(apiServices []*apiregistration.APIService) (*AvailableCond
@@ -128,16 +128,17 @@ index dc9fbdd3541..895f8791f06 100644
  
  	c := AvailableConditionController{
  		apiServiceClient: fakeClient.ApiregistrationV1(),
-@@ -132,7 +134,7 @@ func setupAPIServices(apiServices []*apiregistration.APIService) (*AvailableCond
+@@ -132,7 +134,8 @@ func setupAPIServices(apiServices []*apiregistration.APIService) (*AvailableCond
  			// the maximum disruption time to a minimum, but it does prevent hot loops.
  			workqueue.NewItemExponentialFailureRateLimiter(5*time.Millisecond, 30*time.Second),
  			"AvailableConditionController"),
 -		metrics: newAvailabilityMetrics(),
++		metrics:      newAvailabilityMetrics(),
 +		hasBeenReady: alwaysReadyChan,
  	}
  	for _, svc := range apiServices {
  		c.addAPIService(svc)
-@@ -386,6 +388,8 @@ func TestSync(t *testing.T) {
+@@ -386,6 +389,8 @@ func TestSync(t *testing.T) {
  				w.WriteHeader(tc.backendStatus)
  			}))
  			defer testServer.Close()
@@ -146,7 +147,7 @@ index dc9fbdd3541..895f8791f06 100644
  
  			c := AvailableConditionController{
  				apiServiceClient:           fakeClient.ApiregistrationV1(),
-@@ -395,6 +399,7 @@ func TestSync(t *testing.T) {
+@@ -395,6 +400,7 @@ func TestSync(t *testing.T) {
  				serviceResolver:            &fakeServiceResolver{url: testServer.URL},
  				proxyCurrentCertKeyContent: func() ([]byte, []byte) { return emptyCert(), emptyCert() },
  				metrics:                    newAvailabilityMetrics(),
