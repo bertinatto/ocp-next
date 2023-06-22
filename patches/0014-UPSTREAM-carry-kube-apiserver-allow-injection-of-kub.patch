@@ -1,4 +1,4 @@
-From 48ee684e594e5da018c8a90b2a42b04a5cca1633 Mon Sep 17 00:00:00 2001
+From 61337d3ce35ad851a97fbd42272197a5bb51b343 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: allow injection of
@@ -12,10 +12,9 @@ OpenShift-Rebase-Source: bcf574c65d1
  cmd/kube-apiserver/app/options/options.go     |  6 ++
  cmd/kube-apiserver/app/patch_openshift.go     | 33 ++++++++++
  cmd/kube-apiserver/app/server.go              | 32 +++++++++
- pkg/controlplane/apiserver/config.go          | 14 ++++
  .../rbac/bootstrappolicy/patch_policy.go      | 65 +++++++++++++++++++
  .../authorizer/rbac/bootstrappolicy/policy.go |  6 +-
- 6 files changed, 153 insertions(+), 3 deletions(-)
+ 5 files changed, 139 insertions(+), 3 deletions(-)
  create mode 100644 cmd/kube-apiserver/app/patch_openshift.go
  create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
 
@@ -138,53 +137,6 @@ index bc5deb924c7..211260a6913 100644
  	// aggregator comes last in the chain
  	aggregatorServer, err := createAggregatorServer(config.Aggregator, kubeAPIServer.GenericAPIServer, apiExtensionsServer.Informers, crdAPIEnabled)
  	if err != nil {
-diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index 553697dc00f..ff6d211fe9e 100644
---- a/pkg/controlplane/apiserver/config.go
-+++ b/pkg/controlplane/apiserver/config.go
-@@ -24,6 +24,7 @@ import (
- 
- 	"k8s.io/apimachinery/pkg/runtime"
- 	"k8s.io/apimachinery/pkg/util/sets"
-+	"k8s.io/apiserver/pkg/admission"
- 	"k8s.io/apiserver/pkg/authorization/authorizer"
- 	"k8s.io/apiserver/pkg/endpoints/discovery/aggregated"
- 	openapinamer "k8s.io/apiserver/pkg/endpoints/openapi"
-@@ -40,7 +41,9 @@ import (
- 	"k8s.io/component-base/version"
- 	openapicommon "k8s.io/kube-openapi/pkg/common"
- 
-+	"k8s.io/kubernetes/cmd/kube-apiserver/app"
- 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
-+	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
- 	"k8s.io/kubernetes/pkg/api/legacyscheme"
- 	"k8s.io/kubernetes/pkg/controlplane"
- 	"k8s.io/kubernetes/pkg/kubeapiserver"
-@@ -53,6 +56,7 @@ func BuildGenericConfig(
- 	s *options.ServerRunOptions,
- 	schemes []*runtime.Scheme,
- 	getOpenAPIDefinitions func(ref openapicommon.ReferenceCallback) map[string]openapicommon.OpenAPIDefinition,
-+	pluginInitializers []admission.PluginInitializer,
- ) (
- 	genericConfig *genericapiserver.Config,
- 	versionedInformers clientgoinformers.SharedInformerFactory,
-@@ -155,6 +159,16 @@ func BuildGenericConfig(
- 		return
- 	}
- 
-+	StartingDelegate, err := app.PatchKubeAPIServerConfig(genericConfig, versionedInformers, &pluginInitializers)
-+	if err != nil {
-+		lastErr = fmt.Errorf("failed to patch: %v", err)
-+		return
-+	}
-+
-+	if enablement.IsOpenShift() {
-+		configdefault.SetAdmissionDefaults(s, versionedInformers, clientgoExternalClient)
-+	}
-+
- 	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIPriorityAndFairness) && s.GenericServerRunOptions.EnablePriorityAndFairness {
- 		genericConfig.FlowControl, lastErr = BuildPriorityAndFairness(s, clientgoExternalClient, versionedInformers)
- 	}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
 new file mode 100644
 index 00000000000..8f91d44c9c8
@@ -281,5 +233,5 @@ index 2e49905210d..dae67b8df83 100644
  		rbacv1helpers.NewClusterBinding("cluster-admin").Groups(user.SystemPrivilegedGroup).BindingOrDie(),
  		rbacv1helpers.NewClusterBinding("system:monitoring").Groups(user.MonitoringGroup).BindingOrDie(),
 -- 
-2.40.1
+2.41.0
 
