@@ -1,4 +1,4 @@
-From 57933af2fd8641d3d5b64251d7a1de837046a56e Mon Sep 17 00:00:00 2001
+From 7d349bd742df41d8b88d892433f945b1dca3de97 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 4 Mar 2021 09:58:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: allows for switching KCM to talk to Kube
@@ -45,10 +45,10 @@ index a7112d003d4..38b64663b18 100644
 +	PreferredHostHealthMonitor          *health.Prober
  }
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index 00dffa2fcf2..92632875b0d 100644
+index da1a94d4a3b..a35158253bf 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
-@@ -76,6 +76,8 @@ import (
+@@ -78,6 +78,8 @@ import (
  	kubectrlmgrconfig "k8s.io/kubernetes/pkg/controller/apis/config"
  	serviceaccountcontroller "k8s.io/kubernetes/pkg/controller/serviceaccount"
  	"k8s.io/kubernetes/pkg/serviceaccount"
@@ -57,7 +57,7 @@ index 00dffa2fcf2..92632875b0d 100644
  )
  
  func init() {
-@@ -135,6 +137,11 @@ controller, and serviceaccounts controller.`,
+@@ -137,6 +139,11 @@ controller, and serviceaccounts controller.`,
  			}
  			cliflag.PrintFlags(cmd.Flags())
  
@@ -66,10 +66,10 @@ index 00dffa2fcf2..92632875b0d 100644
 +				os.Exit(1)
 +			}
 +
- 			c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List())
+ 			c, err := s.Config(KnownControllers(), ControllersDisabledByDefault.List(), names.KCMControllerAliases())
  			if err != nil {
  				return err
-@@ -205,6 +212,17 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
+@@ -207,6 +214,17 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
  		logger.Error(err, "Unable to register configz")
  	}
  
@@ -87,7 +87,7 @@ index 00dffa2fcf2..92632875b0d 100644
  	// Setup any healthz checks we will want to use.
  	var checks []healthz.HealthChecker
  	var electionChecker *leaderelection.HealthzAdaptor
-@@ -741,7 +759,7 @@ func createClientBuilders(logger klog.Logger, c *config.CompletedConfig) (client
+@@ -739,7 +757,7 @@ func createClientBuilders(logger klog.Logger, c *config.CompletedConfig) (client
  		}
  
  		clientBuilder = clientbuilder.NewDynamicClientBuilder(
@@ -97,10 +97,10 @@ index 00dffa2fcf2..92632875b0d 100644
  			metav1.NamespaceSystem)
  	} else {
 diff --git a/cmd/kube-controller-manager/app/options/options.go b/cmd/kube-controller-manager/app/options/options.go
-index 2695810df15..70085ad29f2 100644
+index 6bf326232bb..036b90bee3c 100644
 --- a/cmd/kube-controller-manager/app/options/options.go
 +++ b/cmd/kube-controller-manager/app/options/options.go
-@@ -47,6 +47,8 @@ import (
+@@ -49,6 +49,8 @@ import (
  
  	// add the kubernetes feature gates
  	_ "k8s.io/kubernetes/pkg/features"
@@ -109,7 +109,7 @@ index 2695810df15..70085ad29f2 100644
  )
  
  const (
-@@ -268,6 +270,7 @@ func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledBy
+@@ -271,6 +273,7 @@ func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledBy
  	fs.StringVar(&s.Generic.ClientConnection.Kubeconfig, "kubeconfig", s.Generic.ClientConnection.Kubeconfig, "Path to kubeconfig file with authorization and master location information (the master location can be overridden by the master flag).")
  	fs.StringVar(&s.OpenShiftContext.OpenShiftConfig, "openshift-config", s.OpenShiftContext.OpenShiftConfig, "indicates that this process should be compatible with openshift start master")
  	fs.MarkHidden("openshift-config")
@@ -117,7 +117,7 @@ index 2695810df15..70085ad29f2 100644
  	utilfeature.DefaultMutableFeatureGate.AddFlag(fss.FlagSet("generic"))
  
  	return fss
-@@ -438,6 +441,11 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
+@@ -441,6 +444,11 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
  	kubeconfig.QPS = s.Generic.ClientConnection.QPS
  	kubeconfig.Burst = int(s.Generic.ClientConnection.Burst)
  
@@ -208,5 +208,5 @@ index 5d85c022993..9286fa77cc3 100644
 +	return &restConfigCopy
 +}
 -- 
-2.40.1
+2.41.0
 
