@@ -1,4 +1,4 @@
-From 7c797c176b4241c698674d086814ee177fc8f398 Mon Sep 17 00:00:00 2001
+From 97d80b42b3d1651e39fa8f6fb63a82afb670464f Mon Sep 17 00:00:00 2001
 From: Maru Newby <me@maru.ca>
 Date: Mon, 10 May 2021 15:00:03 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Ensure service ca is mounted for projected
@@ -32,6 +32,8 @@ OpenShift-Rebase-Source: d69d054c1ce
 ---
  .../app/certificates.go                       |  14 ++
  .../app/controllermanager.go                  |   1 +
+ .../app/controllermanager_test.go             |   1 +
+ .../names/controller_names.go                 |   2 +
  .../servicecacertpublisher/metrics.go         |  56 +++++
  .../servicecacertpublisher/metrics_test.go    |  81 +++++++
  .../servicecacertpublisher/publisher.go       | 216 ++++++++++++++++++
@@ -41,14 +43,14 @@ OpenShift-Rebase-Source: d69d054c1ce
  .../rbac/bootstrappolicy/controller_policy.go |   7 +
  .../testdata/controller-role-bindings.yaml    |  17 ++
  .../testdata/controller-roles.yaml            |  26 +++
- 11 files changed, 593 insertions(+)
+ 13 files changed, 596 insertions(+)
  create mode 100644 openshift-kube-controller-manager/servicecacertpublisher/metrics.go
  create mode 100644 openshift-kube-controller-manager/servicecacertpublisher/metrics_test.go
  create mode 100644 openshift-kube-controller-manager/servicecacertpublisher/publisher.go
  create mode 100644 openshift-kube-controller-manager/servicecacertpublisher/publisher_test.go
 
 diff --git a/cmd/kube-controller-manager/app/certificates.go b/cmd/kube-controller-manager/app/certificates.go
-index 42d80bb63cb..dffa7b79912 100644
+index 5d716f85d03..f2f8f4b8a1b 100644
 --- a/cmd/kube-controller-manager/app/certificates.go
 +++ b/cmd/kube-controller-manager/app/certificates.go
 @@ -25,6 +25,7 @@ import (
@@ -59,7 +61,7 @@ index 42d80bb63cb..dffa7b79912 100644
  	"k8s.io/kubernetes/pkg/controller/certificates/approver"
  	"k8s.io/kubernetes/pkg/controller/certificates/cleaner"
  	"k8s.io/kubernetes/pkg/controller/certificates/rootcacertpublisher"
-@@ -192,3 +193,16 @@ func startRootCACertPublisher(ctx context.Context, controllerContext ControllerC
+@@ -193,3 +194,16 @@ func startRootCACertPublisher(ctx context.Context, controllerContext ControllerC
  	go sac.Run(ctx, 1)
  	return nil, true, nil
  }
@@ -77,17 +79,49 @@ index 42d80bb63cb..dffa7b79912 100644
 +	return nil, true, nil
 +}
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index 92632875b0d..d5088fdbb3b 100644
+index a35158253bf..6c264c2d2aa 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
-@@ -501,6 +501,7 @@ func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc
- 	register("pv-protection", startPVProtectionController)
- 	register("ttl-after-finished", startTTLAfterFinishedController)
- 	register("root-ca-cert-publisher", startRootCACertPublisher)
-+	register("service-ca-cert-publisher", startServiceCACertPublisher)
- 	register("ephemeral-volume", startEphemeralVolumeController)
+@@ -499,6 +499,7 @@ func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc
+ 	register(names.PersistentVolumeProtectionController, startPVProtectionController)
+ 	register(names.TTLAfterFinishedController, startTTLAfterFinishedController)
+ 	register(names.RootCACertificatePublisherController, startRootCACertPublisher)
++	register(names.ServiceCACertificatePublisherController, startServiceCACertPublisher)
+ 	register(names.EphemeralVolumeController, startEphemeralVolumeController)
  	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerIdentity) &&
  		utilfeature.DefaultFeatureGate.Enabled(genericfeatures.StorageVersionAPI) {
+diff --git a/cmd/kube-controller-manager/app/controllermanager_test.go b/cmd/kube-controller-manager/app/controllermanager_test.go
+index d71823e3796..06aec67a0cf 100644
+--- a/cmd/kube-controller-manager/app/controllermanager_test.go
++++ b/cmd/kube-controller-manager/app/controllermanager_test.go
+@@ -79,6 +79,7 @@ func TestControllerNamesDeclaration(t *testing.T) {
+ 		names.PersistentVolumeProtectionController,
+ 		names.TTLAfterFinishedController,
+ 		names.RootCACertificatePublisherController,
++		names.ServiceCACertificatePublisherController,
+ 		names.EphemeralVolumeController,
+ 		names.StorageVersionGarbageCollectorController,
+ 		names.ResourceClaimController,
+diff --git a/cmd/kube-controller-manager/names/controller_names.go b/cmd/kube-controller-manager/names/controller_names.go
+index a3d606291db..2537f02f8c1 100644
+--- a/cmd/kube-controller-manager/names/controller_names.go
++++ b/cmd/kube-controller-manager/names/controller_names.go
+@@ -82,6 +82,7 @@ const (
+ 	PersistentVolumeProtectionController         = "persistentvolume-protection-controller"
+ 	TTLAfterFinishedController                   = "ttl-after-finished-controller"
+ 	RootCACertificatePublisherController         = "root-ca-certificate-publisher-controller"
++	ServiceCACertificatePublisherController      = "service-ca-certificate-publisher-controller"
+ 	EphemeralVolumeController                    = "ephemeral-volume-controller"
+ 	StorageVersionGarbageCollectorController     = "storageversion-garbage-collector-controller"
+ 	ResourceClaimController                      = "resourceclaim-controller"
+@@ -132,6 +133,7 @@ func KCMControllerAliases() map[string]string {
+ 		"pv-protection":                        PersistentVolumeProtectionController,
+ 		"ttl-after-finished":                   TTLAfterFinishedController,
+ 		"root-ca-cert-publisher":               RootCACertificatePublisherController,
++		"service-ca-cert-publisher":            ServiceCACertificatePublisherController,
+ 		"ephemeral-volume":                     EphemeralVolumeController,
+ 		"storage-version-gc":                   StorageVersionGarbageCollectorController,
+ 		"resource-claim-controller":            ResourceClaimController,
 diff --git a/openshift-kube-controller-manager/servicecacertpublisher/metrics.go b/openshift-kube-controller-manager/servicecacertpublisher/metrics.go
 new file mode 100644
 index 00000000000..e6867784043
@@ -746,5 +780,5 @@ index 8dbe0183399..d87ddaf4730 100644
    kind: ClusterRole
    metadata:
 -- 
-2.40.1
+2.41.0
 
