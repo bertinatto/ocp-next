@@ -4,17 +4,17 @@ set -eo pipefail
 
 main() {
     local branch_name="ocp-next"
-    local should_build=false
+    local should_update=false
     local should_commit=false
     local should_push=false
 
-    while getopts "l:b:c:p:" opt; do
+    while getopts "l:g:c:p:" opt; do
         case $opt in
             l)
                 branch_name=${OPTARG}
                 ;;
-            b)
-                should_build=${OPTARG}
+            g)
+                should_update=${OPTARG}
                 ;;
             c)
                 should_commit=${OPTARG}
@@ -29,7 +29,7 @@ main() {
         esac
     done
 
-    configure_go
+    setup_go
     setup_git
     clone_upstream_repo
     pushd kubernetes || exit 1
@@ -37,10 +37,10 @@ main() {
     create_branch "$branch_name"
     merge_changes
     apply_patches
-    update_dependencies
-    update_vendor
-    if $should_build; then
-        update_and_build
+    if $should_update; then
+	update_dependencies
+	update_vendor
+        update_generated
     fi
     if $should_push; then
 	commit
@@ -51,7 +51,7 @@ main() {
     popd
 }
 
-configure_go() {
+setup_go() {
     eval "$(gimme 1.20.3)"
     export FORCE_HOST_GO=1
 }
@@ -106,10 +106,9 @@ update_vendor() {
     hack/update-vendor.sh
 }
 
-update_and_build() {
+update_generated() {
     eval "$(hack/install-etcd.sh | grep "export PATH")"
     make clean && make update
-    # TODO: add a "make all" step
 }
 
 commit() {
