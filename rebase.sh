@@ -32,10 +32,11 @@ main() {
     setup_go
     setup_git
     clone_upstream_repo
+    # The remaining commands are meant to run inside the kubernetes directory, so enter it
     pushd kubernetes || exit 1
     add_openshift_remote
-    create_branch "$branch_name"
-    merge_changes
+    create_local_branch "$branch_name"
+    merge_openshift_master
     apply_patches
     if $should_update; then
 	update_dependencies
@@ -62,22 +63,28 @@ setup_git() {
 }
 
 clone_upstream_repo() {
+    # Clone upstream repo, if it doesn't exist yet
     git clone --origin upstream "https://github.com/kubernetes/kubernetes.git" || true
+    # Make sure we have the latest code from master
+    pushd kubernetes || exit 1
+    git fetch upstream master
+    popd
 }
 
 add_openshift_remote() {
-    git remote add openshift --fetch "https://github.com/openshift/kubernetes.git" || true
+    # Add openshift remote and make sure it's updated
+    git remote add openshift "https://github.com/openshift/kubernetes.git" || true
+    git fetch openshift master
 }
 
-create_branch() {
+create_local_branch() {
     local branch_name="$1"
-    git clean -fd
-    git checkout -- .
-    git fetch upstream master
+    # Make sure the repo is clean
+    git clean -fd && git checkout -- .
     git checkout -B "$branch_name" upstream/master
 }
 
-merge_changes() {
+merge_openshift_master() {
     git merge -s ours --no-edit openshift/master
 }
 
