@@ -4,8 +4,8 @@ set -eo pipefail
 
 main() {
     local branch_name="ocp-next"
-    local should_commit=false
     local should_build=false
+    local should_commit=false
     local should_push=false
 
     while getopts "l:b:c:p:" opt; do
@@ -29,6 +29,7 @@ main() {
         esac
     done
 
+    configure_go
     setup_git
     clone_upstream_repo
     pushd kubernetes || exit 1
@@ -48,6 +49,11 @@ main() {
 	commit
     fi
     popd
+}
+
+configure_go() {
+    eval "$(gimme 1.20.3)"
+    export FORCE_HOST_GO=1
 }
 
 setup_git() {
