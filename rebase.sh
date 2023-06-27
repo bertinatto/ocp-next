@@ -92,7 +92,7 @@ apply_patches() {
     local patch
     echo "Starting to apply patches"
     for patch in ../patches/*.patch; do
-        if ! git am "$patch"; then
+        if ! git am --3way "$patch"; then
             echo "Failed to apply $patch"
 	    exit 1
         else
