@@ -1,4 +1,4 @@
-From 819dd23b78d7c0bbbce9867c7b1d9b3052015650 Mon Sep 17 00:00:00 2001
+From a6bb409b39aa655ad17200e3e0ab698da9155749 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:57 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -206,7 +206,7 @@ For more information see - https://github.com/openshift/enhancements/pull/1213
 Signed-off-by: ehila <ehila@redhat.com>
 ---
  cmd/kube-apiserver/app/patch_openshift.go     |  33 -
- cmd/kube-apiserver/app/server.go              |  25 +-
+ cmd/kube-apiserver/app/server.go              |  34 +-
  .../admissionenablement/admission.go          |  15 +
  .../admissionenablement/admission_config.go   |  51 +
  .../admission/admissionenablement/register.go | 123 +++
@@ -384,13 +384,14 @@ Signed-off-by: ehila <ehila@redhat.com>
  .../patch_handlerchain.go                     |  97 ++
  .../openshiftkubeapiserver/sdn_readyz_wait.go | 146 +++
  .../openshiftkubeapiserver/wellknown_oauth.go |  57 ++
+ pkg/controlplane/apiserver/config.go          |   4 +
  pkg/kubeapiserver/authorizer/config.go        |  21 +-
  pkg/kubeapiserver/authorizer/modes/patch.go   |   8 +
  pkg/kubeapiserver/authorizer/patch.go         |   8 +
  .../rbac/bootstrappolicy/controller_policy.go |   2 +
  .../testdata/controller-roles.yaml            |  12 +
  .../go-runner/testdata/tartest/out.tar.gz     | Bin 0 -> 174 bytes
- 185 files changed, 19341 insertions(+), 49 deletions(-)
+ 186 files changed, 19354 insertions(+), 49 deletions(-)
  delete mode 100644 cmd/kube-apiserver/app/patch_openshift.go
  create mode 100644 openshift-kube-apiserver/admission/admissionenablement/admission.go
  create mode 100644 openshift-kube-apiserver/admission/admissionenablement/admission_config.go
@@ -613,18 +614,18 @@ index c1183c3e7f4..00000000000
 -
 -var StartingDelegate genericapiserver.DelegationTarget = genericapiserver.NewEmptyDelegate()
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 211260a6913..8ee96dc64a7 100644
+index d5cf337f160..9c30087374a 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -29,6 +29,7 @@ import (
- 	"strings"
- 	"time"
+@@ -26,6 +26,7 @@ import (
+ 	"net/url"
+ 	"os"
  
 +	"k8s.io/kubernetes/openshift-kube-apiserver/admission/admissionenablement"
  	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
  	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
  
-@@ -115,28 +116,32 @@ cluster's shared state through which all other components interact.`,
+@@ -108,28 +109,32 @@ cluster's shared state through which all other components interact.`,
  			cliflag.PrintFlags(fs)
  
  			if len(s.OpenShiftConfig) > 0 {
@@ -665,7 +666,7 @@ index 211260a6913..8ee96dc64a7 100644
  			}
  
  			// set default options
-@@ -220,10 +225,6 @@ func CreateServerChain(config CompletedConfig) (*aggregatorapiserver.APIAggregat
+@@ -213,10 +218,6 @@ func CreateServerChain(config CompletedConfig) (*aggregatorapiserver.APIAggregat
  		return nil, err
  	}
  
@@ -676,6 +677,22 @@ index 211260a6913..8ee96dc64a7 100644
  	// aggregator comes last in the chain
  	aggregatorServer, err := createAggregatorServer(config.Aggregator, kubeAPIServer.GenericAPIServer, apiExtensionsServer.Informers, crdAPIEnabled)
  	if err != nil {
+@@ -330,6 +331,15 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
+ 	if err != nil {
+ 		return nil, nil, nil, fmt.Errorf("failed to create real dynamic external client: %w", err)
+ 	}
++
++	if err := openshiftkubeapiserver.OpenShiftKubeAPIServerConfigPatch(genericConfig, versionedInformers, &pluginInitializers); err != nil {
++		return nil, nil, nil, fmt.Errorf("failed to patch: %v", err)
++	}
++
++	if enablement.IsOpenShift() {
++		admissionenablement.SetAdmissionDefaults(&opts.CompletedOptions, versionedInformers, clientgoExternalClient)
++	}
++
+ 	err = opts.Admission.ApplyTo(
+ 		genericConfig,
+ 		versionedInformers,
 diff --git a/openshift-kube-apiserver/admission/admissionenablement/admission.go b/openshift-kube-apiserver/admission/admissionenablement/admission.go
 new file mode 100644
 index 00000000000..a701f6d285c
@@ -699,7 +716,7 @@ index 00000000000..a701f6d285c
 +}
 diff --git a/openshift-kube-apiserver/admission/admissionenablement/admission_config.go b/openshift-kube-apiserver/admission/admissionenablement/admission_config.go
 new file mode 100644
-index 00000000000..4c90db4903e
+index 00000000000..dedb9eddbc0
 --- /dev/null
 +++ b/openshift-kube-apiserver/admission/admissionenablement/admission_config.go
 @@ -0,0 +1,51 @@
@@ -713,8 +730,8 @@ index 00000000000..4c90db4903e
 +	"k8s.io/apiserver/pkg/admission"
 +	"k8s.io/client-go/informers"
 +	"k8s.io/client-go/kubernetes"
-+	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 +	"k8s.io/kubernetes/openshift-kube-apiserver/admission/namespaceconditions"
++	controlplaneapiserver "k8s.io/kubernetes/pkg/controlplane/apiserver/options"
 +)
 +
 +const disableSCCLevelLabel = "security.openshift.io/disable-securitycontextconstraints"
@@ -729,7 +746,7 @@ index 00000000000..4c90db4903e
 +	}
 +}
 +
-+func SetAdmissionDefaults(o *options.ServerRunOptions, informers informers.SharedInformerFactory, kubeClient kubernetes.Interface) {
++func SetAdmissionDefaults(o *controlplaneapiserver.CompletedOptions, informers informers.SharedInformerFactory, kubeClient kubernetes.Interface) {
 +	// set up the decorators we need.  This is done late and out of order because our decorators currently require informers which are not
 +	// present until we start running
 +	namespaceLabelDecorator := namespaceconditions.NamespaceLabelConditions{
@@ -21019,6 +21036,28 @@ index 00000000000..8b34da7aa32
 +
 +	return data, nil
 +}
+diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
+index af4b82b2657..c40e4fb9551 100644
+--- a/pkg/controlplane/apiserver/config.go
++++ b/pkg/controlplane/apiserver/config.go
+@@ -46,6 +46,8 @@ import (
+ 	"k8s.io/kubernetes/pkg/kubeapiserver"
+ 	"k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes"
+ 	rbacrest "k8s.io/kubernetes/pkg/registry/rbac/rest"
++
++	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
+ )
+ 
+ // BuildGenericConfig takes the master server options and produces the genericapiserver.Config associated with it
+@@ -128,6 +130,8 @@ func BuildGenericConfig(
+ 	// on a fast local network
+ 	genericConfig.LoopbackClientConfig.DisableCompression = true
+ 
++	enablement.SetLoopbackClientConfig(genericConfig.LoopbackClientConfig)
++
+ 	kubeClientConfig := genericConfig.LoopbackClientConfig
+ 	clientgoExternalClient, err := clientgoclientset.NewForConfig(kubeClientConfig)
+ 	if err != nil {
 diff --git a/pkg/kubeapiserver/authorizer/config.go b/pkg/kubeapiserver/authorizer/config.go
 index f9c6aeabc86..97f1b3ef85a 100644
 --- a/pkg/kubeapiserver/authorizer/config.go
