@@ -1,4 +1,4 @@
-From 61337d3ce35ad851a97fbd42272197a5bb51b343 Mon Sep 17 00:00:00 2001
+From 62018f2a275bdb729522ca86c1ab9835b81a2eeb Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: allow injection of
@@ -19,21 +19,21 @@ OpenShift-Rebase-Source: bcf574c65d1
  create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
 
 diff --git a/cmd/kube-apiserver/app/options/options.go b/cmd/kube-apiserver/app/options/options.go
-index ae0cbdff003..82c6978af1e 100644
+index df87d0aef77..fe1d12a1576 100644
 --- a/cmd/kube-apiserver/app/options/options.go
 +++ b/cmd/kube-apiserver/app/options/options.go
-@@ -87,6 +87,8 @@ type ServerRunOptions struct {
- 	ServiceAccountTokenMaxExpiration time.Duration
+@@ -58,6 +58,8 @@ type Extra struct {
+ 	ServiceNodePortRange utilnet.PortRange
  
- 	ShowHiddenMetricsForVersion string
+ 	EndpointReconcilerType string
 +
 +	OpenShiftConfig string
  }
  
  // NewServerRunOptions creates a new ServerRunOptions object with default parameters
-@@ -241,5 +243,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
- 	fs.StringVar(&s.ServiceAccountSigningKeyFile, "service-account-signing-key-file", s.ServiceAccountSigningKeyFile, ""+
- 		"Path to the file that contains the current private key of the service account token issuer. The issuer will sign issued ID tokens with this private key.")
+@@ -146,5 +148,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
+ 	fs.StringVar(&s.KubeletConfig.TLSClientConfig.CAFile, "kubelet-certificate-authority", s.KubeletConfig.TLSClientConfig.CAFile,
+ 		"Path to a cert file for the certificate authority.")
  
 +	fs.StringVar(&s.OpenShiftConfig, "openshift-config", s.OpenShiftConfig, "config for openshift")
 +	fs.MarkDeprecated("openshift-config", "to be removed")
@@ -81,12 +81,12 @@ index 00000000000..c1183c3e7f4
 +
 +var StartingDelegate genericapiserver.DelegationTarget = genericapiserver.NewEmptyDelegate()
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index bc5deb924c7..211260a6913 100644
+index b021bac2574..d5cf337f160 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -29,6 +29,9 @@ import (
- 	"strings"
- 	"time"
+@@ -26,6 +26,9 @@ import (
+ 	"net/url"
+ 	"os"
  
 +	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
 +	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
@@ -94,7 +94,7 @@ index bc5deb924c7..211260a6913 100644
  	"github.com/spf13/cobra"
  
  	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-@@ -111,6 +114,31 @@ cluster's shared state through which all other components interact.`,
+@@ -104,6 +107,31 @@ cluster's shared state through which all other components interact.`,
  			}
  			cliflag.PrintFlags(fs)
  
@@ -124,9 +124,9 @@ index bc5deb924c7..211260a6913 100644
 +			}
 +
  			// set default options
- 			completedOptions, err := Complete(s)
+ 			completedOptions, err := s.Complete()
  			if err != nil {
-@@ -192,6 +220,10 @@ func CreateServerChain(config CompletedConfig) (*aggregatorapiserver.APIAggregat
+@@ -185,6 +213,10 @@ func CreateServerChain(config CompletedConfig) (*aggregatorapiserver.APIAggregat
  		return nil, err
  	}
  
