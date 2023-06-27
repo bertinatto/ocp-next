@@ -1,4 +1,4 @@
-From 0cb3c03f482d980cdc48e3f391c07800a9c5b289 Mon Sep 17 00:00:00 2001
+From eaa5ff26bf1251350a22833aad0d6edbe15aa78f Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: create termination events
@@ -35,26 +35,32 @@ UPSTREAM: <carry>: rename termination events to use lifecycleSignals
 
 OpenShift-Rebase-Source: 15b2d2e6e07
 ---
- cmd/kube-apiserver/app/server.go              |  49 ++++++
+ cmd/kube-apiserver/app/server.go              |  50 ++++++
  .../src/k8s.io/apiserver/pkg/server/config.go |  82 ++++++++++
  .../apiserver/pkg/server/genericapiserver.go  |  68 +++++++-
  .../pkg/server/patch_genericapiserver.go      | 152 ++++++++++++++++++
- 4 files changed, 349 insertions(+), 2 deletions(-)
+ 4 files changed, 350 insertions(+), 2 deletions(-)
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
 
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 8ee96dc64a7..c8233d00108 100644
+index 9c30087374a..bc32870db7b 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -20,6 +20,7 @@ limitations under the License.
+@@ -20,11 +20,13 @@ limitations under the License.
  package app
  
  import (
 +	"context"
  	"crypto/tls"
  	"fmt"
- 	"net"
-@@ -35,8 +36,10 @@ import (
+ 	"net/http"
+ 	"net/url"
+ 	"os"
++	"time"
+ 
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/admissionenablement"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
+@@ -32,8 +34,10 @@ import (
  
  	"github.com/spf13/cobra"
  
@@ -65,15 +71,15 @@ index 8ee96dc64a7..c8233d00108 100644
  	"k8s.io/apimachinery/pkg/runtime"
  	utilerrors "k8s.io/apimachinery/pkg/util/errors"
  	utilnet "k8s.io/apimachinery/pkg/util/net"
-@@ -44,6 +47,7 @@ import (
+@@ -41,6 +45,7 @@ import (
  	"k8s.io/apiserver/pkg/admission"
  	"k8s.io/apiserver/pkg/cel/openapi/resolver"
  	genericapifilters "k8s.io/apiserver/pkg/endpoints/filters"
 +	"k8s.io/apiserver/pkg/endpoints/request"
  	genericapiserver "k8s.io/apiserver/pkg/server"
  	"k8s.io/apiserver/pkg/server/egressselector"
- 	serveroptions "k8s.io/apiserver/pkg/server/options"
-@@ -71,6 +75,8 @@ import (
+ 	utilfeature "k8s.io/apiserver/pkg/util/feature"
+@@ -66,12 +71,15 @@ import (
  
  	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
  	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -82,20 +88,19 @@ index 8ee96dc64a7..c8233d00108 100644
  	"k8s.io/kubernetes/pkg/capabilities"
  	"k8s.io/kubernetes/pkg/controlplane"
  	controlplaneapiserver "k8s.io/kubernetes/pkg/controlplane/apiserver"
-@@ -79,6 +85,7 @@ import (
- 	"k8s.io/kubernetes/pkg/kubeapiserver"
+ 	"k8s.io/kubernetes/pkg/controlplane/reconcilers"
+ 	generatedopenapi "k8s.io/kubernetes/pkg/generated/openapi"
  	kubeapiserveradmission "k8s.io/kubernetes/pkg/kubeapiserver/admission"
- 	kubeauthenticator "k8s.io/kubernetes/pkg/kubeapiserver/authenticator"
 +	eventstorage "k8s.io/kubernetes/pkg/registry/core/event/storage"
  	"k8s.io/kubernetes/pkg/serviceaccount"
  )
  
-@@ -270,6 +277,13 @@ func CreateKubeAPIServerConfig(s completedServerRunOptions) (
- 	s.Metrics.Apply()
+@@ -263,6 +271,13 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
+ 	opts.Metrics.Apply()
  	serviceaccount.RegisterMetrics()
  
 +	var eventStorage *eventstorage.REST
-+	eventStorage, err = eventstorage.NewREST(genericConfig.RESTOptionsGetter, uint64(s.EventTTL.Seconds()))
++	eventStorage, err = eventstorage.NewREST(genericConfig.RESTOptionsGetter, uint64(opts.EventTTL.Seconds()))
 +	if err != nil {
 +		return nil, nil, nil, err
 +	}
@@ -104,9 +109,9 @@ index 8ee96dc64a7..c8233d00108 100644
  	config := &controlplane.Config{
  		GenericConfig: genericConfig,
  		ExtraConfig: controlplane.ExtraConfig{
-@@ -583,3 +597,38 @@ func getServiceIPAndRanges(serviceClusterIPRanges string) (net.IP, net.IPNet, ne
+@@ -424,3 +439,38 @@ func buildServiceResolver(enabledAggregatorRouting bool, hostname string, inform
  	}
- 	return apiServerServiceIP, primaryServiceIPRange, secondaryServiceIPRange, nil
+ 	return serviceResolver
  }
 +
 +// eventRegistrySink wraps an event registry in order to be used as direct event sync, without going through the API.
@@ -601,5 +606,5 @@ index 00000000000..1fe3b7e5ef9
 +	return strings.HasPrefix(req.UserAgent(), "kube-apiserver/")
 +}
 -- 
-2.40.1
+2.41.0
 
