@@ -1,52 +1,52 @@
-From af6c6c0d7f6892ee7be275a00522ee6e37e8013c Mon Sep 17 00:00:00 2001
+From d427e3b04b3305bc183a5d6ac5cc84963618e644 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Mon, 14 Jun 2021 15:49:49 -0400
 Subject: [PATCH] UPSTREAM: <carry>: emit event when readyz goes true
 
 OpenShift-Rebase-Source: 6386eb2dafe
 ---
- pkg/controlplane/controller.go | 2 ++
- pkg/controlplane/instance.go   | 1 +
- pkg/controlplane/patch.go      | 5 +++++
+ pkg/controlplane/controller/kubernetesservice/controller.go | 2 ++
+ pkg/controlplane/controller/kubernetesservice/patch.go      | 5 +++++
+ pkg/controlplane/instance.go                                | 1 +
  3 files changed, 8 insertions(+)
- create mode 100644 pkg/controlplane/patch.go
+ create mode 100644 pkg/controlplane/controller/kubernetesservice/patch.go
 
-diff --git a/pkg/controlplane/controller.go b/pkg/controlplane/controller.go
-index 3b2f8d8e4e1..172ba903580 100644
---- a/pkg/controlplane/controller.go
-+++ b/pkg/controlplane/controller.go
-@@ -251,6 +251,8 @@ func (c *Controller) RunKubernetesService(ch chan struct{}) {
+diff --git a/pkg/controlplane/controller/kubernetesservice/controller.go b/pkg/controlplane/controller/kubernetesservice/controller.go
+index 8c72f06b3de..8570557635b 100644
+--- a/pkg/controlplane/controller/kubernetesservice/controller.go
++++ b/pkg/controlplane/controller/kubernetesservice/controller.go
+@@ -217,6 +217,8 @@ func (c *Controller) RunKubernetesService(ch chan struct{}) {
  		return code == http.StatusOK, nil
  	}, ch)
  
-+	kubeAPIServerEmitEventFn(corev1.EventTypeWarning, "KubeAPIReadyz", "readyz=true")
++	KubeAPIServerEmitEventFn(corev1.EventTypeWarning, "KubeAPIReadyz", "readyz=true")
 +
  	wait.NonSlidingUntil(func() {
  		// Service definition is not reconciled after first
  		// run, ports and type will be corrected only during
+diff --git a/pkg/controlplane/controller/kubernetesservice/patch.go b/pkg/controlplane/controller/kubernetesservice/patch.go
+new file mode 100644
+index 00000000000..d78731dda37
+--- /dev/null
++++ b/pkg/controlplane/controller/kubernetesservice/patch.go
+@@ -0,0 +1,5 @@
++package kubernetesservice
++
++var KubeAPIServerEmitEventFn EventSinkFunc = nil
++
++type EventSinkFunc func(eventType, reason, messageFmt string, args ...interface{})
 diff --git a/pkg/controlplane/instance.go b/pkg/controlplane/instance.go
-index aaa27854477..d4b18d5fd3f 100644
+index 59e530c4444..acc35971b0f 100644
 --- a/pkg/controlplane/instance.go
 +++ b/pkg/controlplane/instance.go
-@@ -392,6 +392,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
+@@ -394,6 +394,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
  		GenericAPIServer:          s,
  		ClusterAuthenticationInfo: c.ExtraConfig.ClusterAuthenticationInfo,
  	}
-+	kubeAPIServerEmitEventFn = m.GenericAPIServer.Eventf
++	kubernetesservice.KubeAPIServerEmitEventFn = m.GenericAPIServer.Eventf
  
  	// install legacy rest storage
  
-diff --git a/pkg/controlplane/patch.go b/pkg/controlplane/patch.go
-new file mode 100644
-index 00000000000..ae50703bf35
---- /dev/null
-+++ b/pkg/controlplane/patch.go
-@@ -0,0 +1,5 @@
-+package controlplane
-+
-+var kubeAPIServerEmitEventFn EventSinkFunc = nil
-+
-+type EventSinkFunc func(eventType, reason, messageFmt string, args ...interface{})
 -- 
-2.40.1
+2.41.0
 
