@@ -1,4 +1,4 @@
-From 62018f2a275bdb729522ca86c1ab9835b81a2eeb Mon Sep 17 00:00:00 2001
+From 867e042fb66816db15d8177d10095c843d78629e Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: allow injection of
@@ -19,21 +19,21 @@ OpenShift-Rebase-Source: bcf574c65d1
  create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
 
 diff --git a/cmd/kube-apiserver/app/options/options.go b/cmd/kube-apiserver/app/options/options.go
-index df87d0aef77..fe1d12a1576 100644
+index d40c4282fed..eaa78728b4b 100644
 --- a/cmd/kube-apiserver/app/options/options.go
 +++ b/cmd/kube-apiserver/app/options/options.go
-@@ -58,6 +58,8 @@ type Extra struct {
- 	ServiceNodePortRange utilnet.PortRange
- 
+@@ -60,6 +60,8 @@ type Extra struct {
  	EndpointReconcilerType string
+ 
+ 	MasterCount int
 +
 +	OpenShiftConfig string
  }
  
  // NewServerRunOptions creates a new ServerRunOptions object with default parameters
-@@ -146,5 +148,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
- 	fs.StringVar(&s.KubeletConfig.TLSClientConfig.CAFile, "kubelet-certificate-authority", s.KubeletConfig.TLSClientConfig.CAFile,
- 		"Path to a cert file for the certificate authority.")
+@@ -153,5 +155,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
+ 		"The number of apiservers running in the cluster, must be a positive number. (In use when --endpoint-reconciler-type=master-count is enabled.)")
+ 	fs.MarkDeprecated("apiserver-count", "apiserver-count is deprecated and will be removed in a future version.")
  
 +	fs.StringVar(&s.OpenShiftConfig, "openshift-config", s.OpenShiftConfig, "config for openshift")
 +	fs.MarkDeprecated("openshift-config", "to be removed")
