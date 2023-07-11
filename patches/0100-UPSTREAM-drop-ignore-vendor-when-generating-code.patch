@@ -1,0 +1,25 @@
+From 5e34ae025b3e5b9794061785ac5fc9e866d0a312 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 10 Jul 2023 13:44:37 -0300
+Subject: [PATCH] UPSTREAM: <drop>: ignore vendor when generating code
+
+---
+ hack/update-codegen.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hack/update-codegen.sh b/hack/update-codegen.sh
+index 201aca0b004..8c90dc77a9c 100755
+--- a/hack/update-codegen.sh
++++ b/hack/update-codegen.sh
+@@ -796,7 +796,7 @@ function codegen::subprojects() {
+         CODEGEN_PKG="${codegen}" \
+         UPDATE_API_KNOWN_VIOLATIONS="${UPDATE_API_KNOWN_VIOLATIONS}" \
+         API_KNOWN_VIOLATIONS_DIR="${API_KNOWN_VIOLATIONS_DIR}" \
+-            ./hack/update-codegen.sh > >(indent) 2> >(indent >&2)
++            GOFLAGS=-mod=readonly ./hack/update-codegen.sh > >(indent) 2> >(indent >&2)
+         popd >/dev/null
+     done
+ }
+-- 
+2.41.0
+
