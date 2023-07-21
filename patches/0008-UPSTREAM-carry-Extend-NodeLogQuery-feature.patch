@@ -1,4 +1,4 @@
-From f64e573d5a201530bf537ef6faa14772c813a234 Mon Sep 17 00:00:00 2001
+From d3ad9d2342c04ab323fa4b2bffdb705c7af7e190 Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -6,6 +6,11 @@ Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
 Extend the NodeLogQuery feature to support oc adm node-logs options:
 - Default NodeLogQuery feature gate to true
 - Add support for --since, --until, --case-sensitive, --output, options
+
+UPSTREAM: <carry>: Extend NodeLogQuery feature
+
+Fix handling of the "until" parameter when generating the journalctl
+command. This was incorrectly being passed with the "since" value.
 ---
  pkg/features/kube_features.go                 |   2 +-
  .../apis/config/validation/validation_test.go |   1 +
@@ -17,17 +22,17 @@ Extend the NodeLogQuery feature to support oc adm node-logs options:
  7 files changed, 161 insertions(+), 41 deletions(-)
 
 diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index c10ef871ac0..97d57d6551f 100644
+index dde237e8b08..bf2d74f367d 100644
 --- a/pkg/features/kube_features.go
 +++ b/pkg/features/kube_features.go
-@@ -996,7 +996,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
+@@ -1096,7 +1096,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
  
- 	NewVolumeManagerReconstruction: {Default: false, PreRelease: featuregate.Beta}, // disabled for https://github.com/kubernetes/kubernetes/issues/117745
+ 	NewVolumeManagerReconstruction: {Default: true, PreRelease: featuregate.Beta},
  
 -	NodeLogQuery: {Default: false, PreRelease: featuregate.Alpha},
 +	NodeLogQuery: {Default: true, PreRelease: featuregate.Alpha},
  
- 	NodeOutOfServiceVolumeDetach: {Default: true, PreRelease: featuregate.Beta},
+ 	NodeOutOfServiceVolumeDetach: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.31
  
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
 index 776a7597372..7ae7801f9e1 100644
@@ -42,10 +47,10 @@ index 776a7597372..7ae7801f9e1 100644
  			return conf
  		},
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index 709e35015fb..7a40797b8ac 100644
+index e8918472ee8..4b9f88d0ca1 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -1568,16 +1568,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
+@@ -1548,16 +1548,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
  					http.Error(w, errs.ToAggregate().Error(), http.StatusBadRequest)
  					return
  				} else if nlq != nil {
@@ -276,7 +281,7 @@ index bf3114519c6..0506eb4aab7 100644
 +	return fmt.Errorf("date must be a relative time of the form '(+|-)[0-9]+(s|m|h|d)' or a date in 'YYYY-MM-DD HH:MM:SS' form")
 +}
 diff --git a/pkg/kubelet/kubelet_server_journal_linux.go b/pkg/kubelet/kubelet_server_journal_linux.go
-index 29f98214713..141337e08f1 100644
+index 29f98214713..bbf0e977226 100644
 --- a/pkg/kubelet/kubelet_server_journal_linux.go
 +++ b/pkg/kubelet/kubelet_server_journal_linux.go
 @@ -31,14 +31,20 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
@@ -295,7 +300,7 @@ index 29f98214713..141337e08f1 100644
 -	if n.UntilTime != nil {
 +
 +	if len(n.Until) > 0 {
-+		args = append(args, fmt.Sprintf("--since=%s", n.Since))
++		args = append(args, fmt.Sprintf("--until=%s", n.Until))
 +	} else if n.UntilTime != nil {
  		args = append(args, fmt.Sprintf("--until=%s", n.SinceTime.Format(dateLayout)))
  	}
@@ -457,5 +462,5 @@ index a805cfc5453..5134d65e8d2 100644
  	}
  	var providers []string
 -- 
-2.40.1
+2.41.0
 
