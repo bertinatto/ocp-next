@@ -1,4 +1,4 @@
-From 7e64e4aad365dea084dd450213213f0464297453 Mon Sep 17 00:00:00 2001
+From 83af9928a1a1a6c7f2c65df2c5f0af62ae889b35 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -407,6 +407,21 @@ Updated builder as well.
 UPSTREAM: <carry>: add missing generated file
 
 UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+Add CSI mock volume tests. In upstream these tests were moved
+to a different package, so we stopped generating their names
+in OpenShift. This patch fixes that.
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+Disable CSI mock tests for SELinux and RecoverVolumeExpansionFailure, which
+are alpha features and require additional work to get enabled.
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+UPSTREAM: <carry>: update rebase doc
 ---
  .ci-operator.yaml                             |   4 +
  .gitignore                                    |   7 +
@@ -442,9 +457,9 @@ UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
  openshift-hack/e2e/annotate/annotate_test.go  |  55 ++
  openshift-hack/e2e/annotate/cmd/main.go       |   9 +
  .../generated/zz_generated.annotations.go     |   1 +
- openshift-hack/e2e/annotate/rules.go          | 241 +++++++
+ openshift-hack/e2e/annotate/rules.go          | 243 +++++++
  openshift-hack/e2e/annotate/rules_test.go     |  88 +++
- openshift-hack/e2e/include.go                 |  22 +
+ openshift-hack/e2e/include.go                 |  23 +
  openshift-hack/e2e/kube_e2e_test.go           | 102 +++
  openshift-hack/images/OWNERS                  |  11 +
  .../images/hyperkube/Dockerfile.rhel          |  16 +
@@ -486,7 +501,7 @@ UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 78 files changed, 6931 insertions(+), 14 deletions(-)
+ 78 files changed, 6934 insertions(+), 14 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -695,7 +710,7 @@ index 00000000000..b04871fc09c
 +that the version is set correctly.
 diff --git a/REBASE.openshift.md b/REBASE.openshift.md
 new file mode 100644
-index 00000000000..34b4e6d8956
+index 00000000000..2edea6fe8e8
 --- /dev/null
 +++ b/REBASE.openshift.md
 @@ -0,0 +1,532 @@
@@ -1005,7 +1020,7 @@ index 00000000000..34b4e6d8956
 +  - Alternatively, run it in the same container as CI is using for build_root that already has
 +    the etcd at correct version
 +```
-+podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.19-openshift-4.12 make update OS_RUN_WITHOUT_DOCKER=yes
++podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.19-openshift-4.12 make update OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1
 +```
 +- Commit the resulting changes as `UPSTREAM: <drop>: make update`.
 +
@@ -1170,7 +1185,7 @@ index 00000000000..34b4e6d8956
 +```
 +podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.19-openshift-4.12 /bin/bash
 +```
-+   In the container run `hack/update-vendor.sh` and `make update OS_RUN_WITHOUT_DOCKER=yes`.
++   In the container run `hack/update-vendor.sh` and `make update OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1`.
 +
 +NOTE: Make sure to use the correct version of the image (both openshift and golang
 +versions must be appropriate), as a reference check `openshift-hack/images/hyperkube/Dockerfile.rhel`
@@ -3243,10 +3258,10 @@ index 00000000000..951c880085e
 +package generated
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
 new file mode 100644
-index 00000000000..63ff50260d8
+index 00000000000..44af9c47246
 --- /dev/null
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -0,0 +1,241 @@
+@@ -0,0 +1,243 @@
 +package annotate
 +
 +import (
@@ -3266,6 +3281,8 @@ index 00000000000..63ff50260d8
 +			`\[Feature:SELinuxMountReadWriteOncePod\]`,
 +			`\[Feature:PodSchedulingReadiness\]`,
 +			`\[Feature:InPlacePodVerticalScaling\]`,
++			`\[Feature:RecoverVolumeExpansionFailure\]`,
++			`\[Feature:SELinux\]`,
 +		},
 +		// tests for features that are not implemented in openshift
 +		"[Disabled:Unimplemented]": {
@@ -3584,10 +3601,10 @@ index 00000000000..dd05c1a3ace
 +}
 diff --git a/openshift-hack/e2e/include.go b/openshift-hack/e2e/include.go
 new file mode 100644
-index 00000000000..c25fb7febf2
+index 00000000000..3275a49bfc1
 --- /dev/null
 +++ b/openshift-hack/e2e/include.go
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,23 @@
 +package e2e
 +
 +// This file should import all the packages defining k8s e2e tests that are
@@ -3609,6 +3626,7 @@ index 00000000000..c25fb7febf2
 +	_ "k8s.io/kubernetes/test/e2e/node"
 +	_ "k8s.io/kubernetes/test/e2e/scheduling"
 +	_ "k8s.io/kubernetes/test/e2e/storage"
++	_ "k8s.io/kubernetes/test/e2e/storage/csi_mock"
 +)
 diff --git a/openshift-hack/e2e/kube_e2e_test.go b/openshift-hack/e2e/kube_e2e_test.go
 new file mode 100644
@@ -3737,7 +3755,7 @@ index 00000000000..7b196b0fb70
 +  - sdodson
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
 new file mode 100644
-index 00000000000..89a30c4c2f9
+index 00000000000..648310ed996
 --- /dev/null
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
 @@ -0,0 +1,16 @@
@@ -3756,7 +3774,7 @@ index 00000000000..89a30c4c2f9
 +LABEL io.k8s.display-name="OpenShift Kubernetes Server Commands" \
 +      io.k8s.description="OpenShift is a platform for developing, building, and deploying containerized applications." \
 +      io.openshift.tags="openshift,hyperkube" \
-+      io.openshift.build.versions="kubernetes=1.27.1"
++      io.openshift.build.versions="kubernetes=1.28.0"
 diff --git a/openshift-hack/images/hyperkube/OWNERS b/openshift-hack/images/hyperkube/OWNERS
 new file mode 100644
 index 00000000000..e8146784930
@@ -8042,5 +8060,5 @@ index eb213293cfd..1f6410b020d 100644
  )
  
 -- 
-2.40.1
+2.41.0
 
