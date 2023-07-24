@@ -1,10 +1,10 @@
 From e295f72136db5d2e049db1b2c19223b5f07a99d5 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
-Subject: [PATCH] UPSTREAM: 90452: refactor/improve CRD publishing e2e tests in
+Subject: [PATCH] UPSTREAM: <carry>: refactor/improve CRD publishing e2e tests in
  an HA setup
 
-UPSTREAM: 90452: refactor/improve CRD publishing e2e tests in an HA setup
+UPSTREAM: <carry>: refactor/improve CRD publishing e2e tests in an HA setup
 
 OpenShift-Rebase-Source: 51aeef37fe9
 OpenShift-Rebase-Source: 7fbb6a4e9b7
