@@ -1,7 +1,7 @@
 From 5e34ae025b3e5b9794061785ac5fc9e866d0a312 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Mon, 10 Jul 2023 13:44:37 -0300
-Subject: [PATCH] UPSTREAM: <drop>: ignore vendor when generating code
+Subject: [PATCH] UPSTREAM: <carry>: ignore vendor when generating code
 
 ---
  hack/update-codegen.sh | 2 +-
