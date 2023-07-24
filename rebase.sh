@@ -3,15 +3,19 @@
 set -eo pipefail
 
 main() {
-    local branch_name="ocp-next"
+    local local_branch="ocp-next"
+    local upstream_branch="upstream/master"
     local should_update=false
     local should_commit=false
     local should_push=false
 
-    while getopts "l:g:c:p:" opt; do
+    while getopts "l:u:g:c:p:" opt; do
         case $opt in
             l)
-                branch_name=${OPTARG}
+                local_branch=${OPTARG}
+                ;;
+            u)
+                upstream_branch=${OPTARG}
                 ;;
             g)
                 should_update=${OPTARG}
@@ -36,11 +40,11 @@ main() {
     pushd kubernetes || exit 1
     add_openshift_remote
     add_pr_remote
-    create_local_branch "$branch_name"
+    create_local_branch "$local_branch" "$upstream_branch"
     merge_openshift_master
     apply_patches
     if $should_update; then
-	update_dependencies
+	update_dependencies "$local_branch"
 	update_vendor
         update_generated
     fi
@@ -70,7 +74,7 @@ clone_upstream_repo() {
     git clone --origin upstream "https://github.com/kubernetes/kubernetes.git" || true
     # Make sure we have the latest code from master
     pushd kubernetes || exit 1
-    git fetch upstream master
+    git fetch upstream
     popd
 }
 
@@ -86,11 +90,11 @@ add_pr_remote(){
 }
 
 create_local_branch() {
-    local branch_name="$1"
+    local local_branch="$1"
+    local upstream_branch="$2"
     # Make sure the repo is clean
-    git clean -fd && git checkout -- .
-    # git checkout -B "$branch_name" upstream/master
-    git checkout -B "$branch_name" upstream/master
+    git clean -fd && git checkout -- . 
+    git checkout -B "$local_branch" "$upstream_branch"
 }
 
 merge_openshift_master() {
@@ -111,24 +115,23 @@ apply_patches() {
 }
 
 update_dependencies() {
+    local local_branch="$1"
     GOPROXY=direct hack/pin-dependency.sh github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2 v2.9-openshift-4.14
-    # GOPROXY=direct hack/pin-dependency.sh github.com/openshift/api=github.com/bertinatto/api ocp-next
-    # GOPROXY=direct hack/pin-dependency.sh github.com/openshift/client-go=github.com/bertinatto/client-go ocp-next
-    # GOPROXY=direct hack/pin-dependency.sh github.com/openshift/library-go=github.com/bertinatto/library-go ocp-next
-    # GOPROXY=direct hack/pin-dependency.sh github.com/openshift/apiserver-library-go=github.com/bertinatto/apiserver-library-go ocp-next
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/api=github.com/bertinatto/api "$local_branch"
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/client-go=github.com/bertinatto/client-go "$local_branch"
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/library-go=github.com/bertinatto/library-go "$local_branch"
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/apiserver-library-go=github.com/bertinatto/apiserver-library-go "$local_branch"
 }
 
 update_vendor() {
-    # hack/update-vendor.sh
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 hack/update-vendor.sh OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1
+    hack/update-vendor.sh
+    # podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 hack/update-vendor.sh OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1
 }
 
 update_generated() {
-    # eval "$(hack/install-etcd.sh | grep "export PATH")"
-    # make clean && make update
-    make clean
-    hack/install-etcd.sh
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'export PATH="/go/k8s.io/kubernetes/third_party/etcd:${PATH}" && make update OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1'
+    eval "$(hack/install-etcd.sh | grep "export PATH")"
+    make clean && make update
+    # podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'export PATH="/go/k8s.io/kubernetes/third_party/etcd:${PATH}" && make update OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1'
 }
 
 commit() {
