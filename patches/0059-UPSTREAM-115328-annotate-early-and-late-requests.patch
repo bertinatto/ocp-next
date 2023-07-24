@@ -1,4 +1,4 @@
-From aa6197e7951958112c4b8e21b187c9abfbeb0fd9 Mon Sep 17 00:00:00 2001
+From f787b5f8d2dd8e323a9a1f363b79e938c74e96bf Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Mon, 13 Mar 2023 11:30:57 -0400
 Subject: [PATCH] UPSTREAM: 115328: annotate early and late requests
@@ -15,10 +15,10 @@ Subject: [PATCH] UPSTREAM: 115328: annotate early and late requests
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/lifecycle_signals_test.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 0207916b007..165065f237f 100644
+index 7dea81f8916..fefcc1ff98b 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -1010,6 +1010,9 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1015,6 +1015,9 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator, c.LongRunningFunc)
  	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "audit")
  
@@ -219,7 +219,7 @@ index 00000000000..8b7bcc421cc
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go
 new file mode 100644
-index 00000000000..d76863fa686
+index 00000000000..f45cff7cbd2
 --- /dev/null
 +++ b/staging/src/k8s.io/apiserver/pkg/server/filters/with_early_late_annotations_test.go
 @@ -0,0 +1,451 @@
@@ -549,7 +549,7 @@ index 00000000000..d76863fa686
 +			if ac == nil {
 +				t.Fatalf("expected audit context inside the request context")
 +			}
-+			ac.Event = &auditinternal.Event{
++			ac.Event = auditinternal.Event{
 +				Level: auditinternal.LevelMetadata,
 +			}
 +
@@ -839,5 +839,5 @@ index 00000000000..afc734f477c
 +	}
 +}
 -- 
-2.40.1
+2.41.0
 

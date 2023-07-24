@@ -1,4 +1,4 @@
-From eaa5ff26bf1251350a22833aad0d6edbe15aa78f Mon Sep 17 00:00:00 2001
+From c9540685e1a312c9b61b5c8f53e88bd52ccf87f2 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: create termination events
@@ -43,7 +43,7 @@ OpenShift-Rebase-Source: 15b2d2e6e07
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
 
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 9c30087374a..bc32870db7b 100644
+index ac8e342316e..681aa1817fc 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
 @@ -20,11 +20,13 @@ limitations under the License.
@@ -60,7 +60,7 @@ index 9c30087374a..bc32870db7b 100644
  
  	"k8s.io/kubernetes/openshift-kube-apiserver/admission/admissionenablement"
  	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
-@@ -32,8 +34,10 @@ import (
+@@ -32,14 +34,17 @@ import (
  
  	"github.com/spf13/cobra"
  
@@ -71,15 +71,14 @@ index 9c30087374a..bc32870db7b 100644
  	"k8s.io/apimachinery/pkg/runtime"
  	utilerrors "k8s.io/apimachinery/pkg/util/errors"
  	utilnet "k8s.io/apimachinery/pkg/util/net"
-@@ -41,6 +45,7 @@ import (
+ 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
  	"k8s.io/apiserver/pkg/admission"
- 	"k8s.io/apiserver/pkg/cel/openapi/resolver"
  	genericapifilters "k8s.io/apiserver/pkg/endpoints/filters"
 +	"k8s.io/apiserver/pkg/endpoints/request"
  	genericapiserver "k8s.io/apiserver/pkg/server"
  	"k8s.io/apiserver/pkg/server/egressselector"
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
-@@ -66,12 +71,15 @@ import (
+@@ -65,12 +70,15 @@ import (
  
  	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
  	"k8s.io/kubernetes/pkg/api/legacyscheme"
@@ -95,7 +94,7 @@ index 9c30087374a..bc32870db7b 100644
  	"k8s.io/kubernetes/pkg/serviceaccount"
  )
  
-@@ -263,6 +271,13 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
+@@ -262,6 +270,13 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
  	opts.Metrics.Apply()
  	serviceaccount.RegisterMetrics()
  
@@ -109,7 +108,7 @@ index 9c30087374a..bc32870db7b 100644
  	config := &controlplane.Config{
  		GenericConfig: genericConfig,
  		ExtraConfig: controlplane.ExtraConfig{
-@@ -424,3 +439,38 @@ func buildServiceResolver(enabledAggregatorRouting bool, hostname string, inform
+@@ -437,3 +452,38 @@ func buildServiceResolver(enabledAggregatorRouting bool, hostname string, inform
  	}
  	return serviceResolver
  }
@@ -149,7 +148,7 @@ index 9c30087374a..bc32870db7b 100644
 +	return &v1ret, nil
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 70cc9583fb7..7a17ee15e1b 100644
+index 315815cd826..005853cfbae 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
 @@ -21,6 +21,7 @@ import (
@@ -177,7 +176,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  	restclient "k8s.io/client-go/rest"
  	"k8s.io/component-base/logs"
  	"k8s.io/component-base/metrics/features"
-@@ -258,6 +262,9 @@ type Config struct {
+@@ -265,6 +269,9 @@ type Config struct {
  	// rejected with a 429 status code and a 'Retry-After' response.
  	ShutdownSendRetryAfter bool
  
@@ -187,7 +186,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  	//===========================================================================
  	// values below here are targets for removal
  	//===========================================================================
-@@ -298,6 +305,11 @@ type Config struct {
+@@ -305,6 +312,11 @@ type Config struct {
  	ShutdownWatchTerminationGracePeriod time.Duration
  }
  
@@ -199,7 +198,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  type RecommendedConfig struct {
  	Config
  
-@@ -632,6 +644,10 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
+@@ -639,6 +651,10 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
  		c.DiscoveryAddresses = discovery.DefaultAddresses{DefaultAddress: c.ExternalAddress}
  	}
  
@@ -210,7 +209,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  	AuthorizeClientBearerToken(c.LoopbackClientConfig, &c.Authentication, &c.Authorization)
  
  	if c.RequestInfoResolver == nil {
-@@ -659,9 +675,58 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
+@@ -666,9 +682,58 @@ func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedCo
  // Complete fills in any fields not set that are required to have valid data and can be derived
  // from other fields. If you're going to `ApplyOptions`, do that first. It's mutating the receiver.
  func (c *RecommendedConfig) Complete() CompletedConfig {
@@ -269,7 +268,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  // New creates a new server which logically combines the handling chain with the passed server.
  // name is used to differentiate for logging. The handler chain in particular can be difficult as it starts delegating.
  // delegationTarget may not be nil.
-@@ -738,7 +803,16 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
+@@ -745,7 +810,16 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
  		Version: c.Version,
  
  		muxAndDiscoveryCompleteSignals: map[string]<-chan struct{}{},
@@ -286,7 +285,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
  
  	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.AggregatedDiscoveryEndpoint) {
  		manager := c.AggregatedDiscoveryGroupManager
-@@ -937,6 +1011,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -946,6 +1020,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	handler = genericapifilters.WithRequestDeadline(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator,
  		c.LongRunningFunc, c.Serializer, c.RequestTimeout)
  	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.NonLongRunningRequestWaitGroup)
@@ -295,9 +294,9 @@ index 70cc9583fb7..7a17ee15e1b 100644
  	if c.ShutdownWatchTerminationGracePeriod > 0 {
  		handler = genericfilters.WithWatchTerminationDuringShutdown(handler, c.lifecycleSignals, c.WatchRequestWaitGroup)
  	}
-@@ -1070,3 +1146,9 @@ func AuthorizeClientBearerToken(loopback *restclient.Config, authn *Authenticati
- 	tokenAuthenticator := authenticatorfactory.NewFromTokens(tokens, authn.APIAudiences)
- 	authn.Authenticator = authenticatorunion.New(tokenAuthenticator, authn.Authenticator)
+@@ -1088,3 +1164,9 @@ func SetHostnameFuncForTests(name string) {
+ 		return
+ 	}
  }
 +
 +type nullEventSink struct{}
@@ -306,7 +305,7 @@ index 70cc9583fb7..7a17ee15e1b 100644
 +	return nil, nil
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go b/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
-index 794a5db2f77..4bb446c2297 100644
+index 665f20bebdb..6affc822665 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
 @@ -21,6 +21,7 @@ import (
@@ -413,7 +412,7 @@ index 794a5db2f77..4bb446c2297 100644
  	return nil
  }
  
-@@ -1005,3 +1039,33 @@ func getResourceNamesForGroup(apiPrefix string, apiGroupInfo *APIGroupInfo, path
+@@ -1018,3 +1052,33 @@ func getResourceNamesForGroup(apiPrefix string, apiGroupInfo *APIGroupInfo, path
  
  	return resourceNames, nil
  }

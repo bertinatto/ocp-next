@@ -1,4 +1,4 @@
-From 97d80b42b3d1651e39fa8f6fb63a82afb670464f Mon Sep 17 00:00:00 2001
+From 6b55707b5b109ba19988c17f271638fa124674e0 Mon Sep 17 00:00:00 2001
 From: Maru Newby <me@maru.ca>
 Date: Mon, 10 May 2021 15:00:03 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Ensure service ca is mounted for projected
@@ -79,7 +79,7 @@ index 5d716f85d03..f2f8f4b8a1b 100644
 +	return nil, true, nil
 +}
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index a35158253bf..6c264c2d2aa 100644
+index a6993eb7014..2d37c901fba 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -499,6 +499,7 @@ func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc
@@ -103,7 +103,7 @@ index d71823e3796..06aec67a0cf 100644
  		names.StorageVersionGarbageCollectorController,
  		names.ResourceClaimController,
 diff --git a/cmd/kube-controller-manager/names/controller_names.go b/cmd/kube-controller-manager/names/controller_names.go
-index a3d606291db..2537f02f8c1 100644
+index 9004514fd3c..c8a43305d0a 100644
 --- a/cmd/kube-controller-manager/names/controller_names.go
 +++ b/cmd/kube-controller-manager/names/controller_names.go
 @@ -82,6 +82,7 @@ const (
@@ -114,7 +114,7 @@ index a3d606291db..2537f02f8c1 100644
  	EphemeralVolumeController                    = "ephemeral-volume-controller"
  	StorageVersionGarbageCollectorController     = "storageversion-garbage-collector-controller"
  	ResourceClaimController                      = "resourceclaim-controller"
-@@ -132,6 +133,7 @@ func KCMControllerAliases() map[string]string {
+@@ -133,6 +134,7 @@ func KCMControllerAliases() map[string]string {
  		"pv-protection":                        PersistentVolumeProtectionController,
  		"ttl-after-finished":                   TTLAfterFinishedController,
  		"root-ca-cert-publisher":               RootCACertificatePublisherController,
@@ -697,10 +697,10 @@ index b5155f5cd33..9aaf8e2c251 100644
  				DefaultMode: utilpointer.Int32(0644),
  			},
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-index dc8ac7022a6..fe27fd48c1a 100644
+index 92b9837a67e..b3f410bbffa 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-@@ -442,6 +442,13 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
+@@ -444,6 +444,13 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
  			eventsRule(),
  		},
  	})
@@ -711,9 +711,9 @@ index dc8ac7022a6..fe27fd48c1a 100644
 +			eventsRule(),
 +		},
 +	})
- 	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.StorageVersionAPI) &&
- 		utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerIdentity) {
+ 	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.ValidatingAdmissionPolicy) {
  		addControllerRole(&controllerRoles, &controllerRoleBindings, rbacv1.ClusterRole{
+ 			ObjectMeta: metav1.ObjectMeta{Name: saRolePrefix + "validatingadmissionpolicy-status-controller"},
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-role-bindings.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-role-bindings.yaml
 index cae8d2d9c47..6247230c1bc 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-role-bindings.yaml

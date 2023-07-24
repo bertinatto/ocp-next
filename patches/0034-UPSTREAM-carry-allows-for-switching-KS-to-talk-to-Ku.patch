@@ -131,7 +131,7 @@ index 00000000000..31b7480b7e4
 +)
 +
 +func LoadKubeSchedulerConfiguration(logger klog.Logger, file string) (*kubeschedulerconfig.KubeSchedulerConfiguration, error) {
-+	return loadConfigFromFile(logger, file)
++	return LoadConfigFromFile(logger, file)
 +}
 diff --git a/cmd/kube-scheduler/app/patch.go b/cmd/kube-scheduler/app/patch.go
 new file mode 100644
