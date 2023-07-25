@@ -1,0 +1,27 @@
+From e4a2b9314188ca56694587a1e985b10956eb8167 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Tue, 25 Jul 2023 14:57:10 -0300
+Subject: [PATCH] UPSTREAM: <carry>: allow apiserver-library-go to depend on
+ k8s.io/kubernetes
+
+---
+ hack/update-vendor.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/hack/update-vendor.sh b/hack/update-vendor.sh
+index abc672df80a..2df125c6e93 100755
+--- a/hack/update-vendor.sh
++++ b/hack/update-vendor.sh
+@@ -356,7 +356,8 @@ xargs -L 100 go mod edit -fmt
+ # disallow transitive dependencies on k8s.io/kubernetes
+ loopback_deps=()
+ kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' || true)
+-if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} ]]; then
++## Allow apiserver-library-go to depend on k8s.io/kubernetes
++if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} && ! "${loopback_deps[*]}" =~ github.com/openshift/apiserver-library-go ]]; then
+   kube::log::error "Disallowed transitive k8s.io/kubernetes dependencies exist via the following imports:" >&22 2>&1
+   kube::log::error "${loopback_deps[@]}" >&22 2>&1
+   exit 1
+-- 
+2.41.0
+
