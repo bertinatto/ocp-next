@@ -1,4 +1,4 @@
-From cc664d644fa448f4f700fab298e7f875711e6a99 Mon Sep 17 00:00:00 2001
+From ad9c631d6636244e24d2e210498f557637d47088 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Mon, 24 Jul 2023 18:59:31 -0300
 Subject: [PATCH] UPSTREAM: <carry>: disable tests for new
@@ -9,13 +9,13 @@ Subject: [PATCH] UPSTREAM: <carry>: disable tests for new
  1 file changed, 2 insertions(+)
 
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index 7185c0f6170..ef176b520a8 100644
+index 0546f4539cd..34519b80215 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -20,6 +20,8 @@ var (
+@@ -19,6 +19,8 @@ var (
+ 			`\[Feature:InPlacePodVerticalScaling\]`,
  			`\[Feature:RecoverVolumeExpansionFailure\]`,
  			`\[Feature:SELinux\]`,
- 			`\[Feature:NodeLogQuery\]`,
 +			`\[Feature:SidecarContainers\]`,
 +			`\[Feature: PersistentVolumeLastPhaseTransitionTime\]`,
  		},
