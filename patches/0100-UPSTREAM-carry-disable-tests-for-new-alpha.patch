@@ -1,0 +1,26 @@
+From cc664d644fa448f4f700fab298e7f875711e6a99 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 24 Jul 2023 18:59:31 -0300
+Subject: [PATCH] UPSTREAM: <carry>: disable tests for new
+ PersistentVolumeLastPhaseTransitionTime and SidecarContainers alpha features
+
+---
+ openshift-hack/e2e/annotate/rules.go | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index 7185c0f6170..ef176b520a8 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -20,6 +20,8 @@ var (
+ 			`\[Feature:RecoverVolumeExpansionFailure\]`,
+ 			`\[Feature:SELinux\]`,
+ 			`\[Feature:NodeLogQuery\]`,
++			`\[Feature:SidecarContainers\]`,
++			`\[Feature: PersistentVolumeLastPhaseTransitionTime\]`,
+ 		},
+ 		// tests for features that are not implemented in openshift
+ 		"[Disabled:Unimplemented]": {
+-- 
+2.41.0
+
