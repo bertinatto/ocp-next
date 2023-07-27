@@ -108,7 +108,7 @@ apply_patches() {
 
 update_dependencies() {
     local local_branch="$1"
-    GOPROXY=direct hack/pin-dependency.sh github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2 v2.9-openshift-4.14
+    GOPROXY=direct hack/pin-dependency.sh github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2 v2.9-openshift-4.15
     GOPROXY=direct hack/pin-dependency.sh github.com/openshift/api=github.com/bertinatto/api "$local_branch"
     GOPROXY=direct hack/pin-dependency.sh github.com/openshift/client-go=github.com/bertinatto/client-go "$local_branch"
     GOPROXY=direct hack/pin-dependency.sh github.com/openshift/library-go=github.com/bertinatto/library-go "$local_branch"
