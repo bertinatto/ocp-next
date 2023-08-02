@@ -1,4 +1,4 @@
-From b059a5d8824f2a14160f7e0f879936f99f5c3aa9 Mon Sep 17 00:00:00 2001
+From 4c5dcd1fe0fb27665c27f8bfaabf9cbcb4974d62 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Fri, 28 Jul 2023 09:59:14 -0300
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -6,11 +6,11 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
 
 Update the list of tests that should be skipped.
 ---
- openshift-hack/e2e/annotate/rules.go | 19 ++++++++++++++++---
- 1 file changed, 16 insertions(+), 3 deletions(-)
+ openshift-hack/e2e/annotate/rules.go | 22 +++++++++++++++++++---
+ 1 file changed, 19 insertions(+), 3 deletions(-)
 
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index ce2e8c14913..fc537f38f1d 100644
+index ce2e8c14913..8adaa8f026f 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -19,6 +19,9 @@ var (
@@ -23,7 +23,7 @@ index ce2e8c14913..fc537f38f1d 100644
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -153,9 +156,19 @@ var (
+@@ -153,9 +156,22 @@ var (
  			`\[sig-network\] Connectivity Pod Lifecycle should be able to connect to other Pod from a terminating Pod`, // TODO(network): simple test in k8s 1.27, needs investigation
  			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`,                    // TODO(workloads): alpha feature in k8s 1.27. It's failing with `error: unknown flag: --applyset`. Needs investigation
  
@@ -43,6 +43,9 @@ index ce2e8c14913..fc537f38f1d 100644
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
++
++			// https://issues.redhat.com/browse/OCPBUGS-17202
++			`\[sig-apps\] StatefulSet Scaling StatefulSetStartOrdinal \[Feature:StatefulSetStartOrdinal\] Removing \.start\.ordinal`,
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
