@@ -1,4 +1,4 @@
-From 9a43ac1c13c835e9d230c1b7574fe91e76c57d60 Mon Sep 17 00:00:00 2001
+From b059a5d8824f2a14160f7e0f879936f99f5c3aa9 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Fri, 28 Jul 2023 09:59:14 -0300
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -10,7 +10,7 @@ Update the list of tests that should be skipped.
  1 file changed, 16 insertions(+), 3 deletions(-)
 
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index cd0afa58093..ada3284ed73 100644
+index ce2e8c14913..fc537f38f1d 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -19,6 +19,9 @@ var (
@@ -23,7 +23,7 @@ index cd0afa58093..ada3284ed73 100644
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -144,9 +147,19 @@ var (
+@@ -153,9 +156,19 @@ var (
  			`\[sig-network\] Connectivity Pod Lifecycle should be able to connect to other Pod from a terminating Pod`, // TODO(network): simple test in k8s 1.27, needs investigation
  			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`,                    // TODO(workloads): alpha feature in k8s 1.27. It's failing with `error: unknown flag: --applyset`. Needs investigation
  
@@ -41,7 +41,7 @@ index cd0afa58093..ada3284ed73 100644
 +			`AdmissionWebhook \[Privileged:ClusterAdmin\] should reject validating webhook configurations with invalid match conditions`,
 +			`AdmissionWebhook \[Privileged:ClusterAdmin\] should mutate everything except 'skip-me' configmaps`,
 +
-+			// https://redhat-internal.slack.com/archives/C05HQGU8TFF/p1690478673323779
++			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
  		},
  		// tests that may work, but we don't support them
