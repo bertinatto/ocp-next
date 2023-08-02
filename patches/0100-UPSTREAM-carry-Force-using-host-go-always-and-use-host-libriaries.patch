@@ -1,7 +1,7 @@
 From d9a1dad918fc27d11b8a687657801b6f7908817d Mon Sep 17 00:00:00 2001
 From: Maciej Szulik <maszulik@redhat.com>
 Date: Fri, 2 Jun 2023 12:20:53 +0200
-Subject: [PATCH] Force using host go always and use host libriaries
+Subject: [PATCH] UPSTREAM: <carry>: Force using host go always and use host libriaries
 
 ---
  hack/lib/golang.sh | 25 +------------------------
