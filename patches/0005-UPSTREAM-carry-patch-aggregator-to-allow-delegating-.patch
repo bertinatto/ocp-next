@@ -1,4 +1,4 @@
-From c0ee8342e914ea218821a4f0c6c275f1fa176217 Mon Sep 17 00:00:00 2001
+From 602f33bcdd8087c8c3d242f50ab93ae20731b8fa Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: patch aggregator to allow delegating
@@ -43,10 +43,10 @@ index 5ee06f6a745..f8825e069d6 100644
  	crds, err := c.crdLister.List(labels.Everything())
  	if err != nil {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index 4c83d8474b9..22ba4a3410f 100644
+index af37ba70f0e..015587aeb51 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-@@ -140,6 +140,9 @@ type APIAggregator struct {
+@@ -151,6 +151,9 @@ type APIAggregator struct {
  	// handledGroups are the groups that already have routes
  	handledGroups sets.String
  
@@ -56,7 +56,7 @@ index 4c83d8474b9..22ba4a3410f 100644
  	// lister is used to add group handling for /apis/<group> aggregator lookups based on
  	// controller state
  	lister listers.APIServiceLister
-@@ -224,18 +227,19 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+@@ -235,18 +238,19 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
  	}
  
  	s := &APIAggregator{
@@ -88,7 +88,7 @@ index 4c83d8474b9..22ba4a3410f 100644
  	}
  
  	// used later  to filter the served resource by those that have expired.
-@@ -553,6 +557,18 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
+@@ -566,6 +570,18 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
  		return nil
  	}
  
@@ -108,18 +108,18 @@ index 4c83d8474b9..22ba4a3410f 100644
  	groupPath := "/apis/" + apiService.Spec.Group
  	groupDiscoveryHandler := &apiGroupHandler{
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
-index 68b81cb7572..3d7dae0d239 100644
+index 8a647a6451c..8da43670b46 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
-@@ -25,6 +25,7 @@ import (
- 	"time"
+@@ -22,6 +22,7 @@ import (
+ 	"sync/atomic"
  
  	"k8s.io/apimachinery/pkg/runtime"
 +	"k8s.io/apimachinery/pkg/runtime/schema"
  	"k8s.io/apimachinery/pkg/util/httpstream"
- 	utilnet "k8s.io/apimachinery/pkg/util/net"
  	"k8s.io/apimachinery/pkg/util/proxy"
-@@ -120,6 +121,14 @@ func (r *proxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+ 	"k8s.io/apiserver/pkg/endpoints/handlers/responsewriters"
+@@ -113,6 +114,14 @@ func (r *proxyHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
  		return
  	}
  
@@ -190,5 +190,5 @@ index 00000000000..f7169c0d1ab
 +	return false
 +}
 -- 
-2.40.1
+2.41.0
 
