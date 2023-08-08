@@ -1,4 +1,4 @@
-From b19fe0cffff045171e9d2ec52748d27dc5865e19 Mon Sep 17 00:00:00 2001
+From 23b36f9cbcd9c62bc48f85f0bf4c0e162596eace Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -456,6 +456,8 @@ These were brought back in o/o PRs as follows:
 UPSTREAM: <carry>: UserNamespacesSupport feature was rename to UserNamespacesStatelessPodsSupport
 
 See commit 531d38e323c54378acd8ea664f5752d31e8ee27a.
+
+UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
 ---
  .ci-operator.yaml                             |   4 +
  .gitignore                                    |   7 +
@@ -472,7 +474,7 @@ See commit 531d38e323c54378acd8ea664f5752d31e8ee27a.
  hack/update-codegen.sh                        |   2 +-
  hack/update-kubensenter.sh                    |   1 +
  hack/update-test-annotations.sh               |   1 +
- hack/update-vendor.sh                         |   2 +-
+ hack/update-vendor.sh                         |   5 +-
  hack/verify-govet-levee.sh                    |   6 +-
  hack/verify-kubensenter.sh                    |   1 +
  hack/verify-pkg-names.sh                      |   2 +-
@@ -541,7 +543,7 @@ See commit 531d38e323c54378acd8ea664f5752d31e8ee27a.
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 84 files changed, 7698 insertions(+), 41 deletions(-)
+ 84 files changed, 7700 insertions(+), 42 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -1870,10 +1872,20 @@ index 00000000000..ecf920cd8d6
 +../openshift-hack/update-test-annotations.sh
 \ No newline at end of file
 diff --git a/hack/update-vendor.sh b/hack/update-vendor.sh
-index 5977037cc4e..abc672df80a 100755
+index 5977037cc4e..2df125c6e93 100755
 --- a/hack/update-vendor.sh
 +++ b/hack/update-vendor.sh
-@@ -400,7 +400,7 @@ hack/update-vendor-licenses.sh
+@@ -356,7 +356,8 @@ xargs -L 100 go mod edit -fmt
+ # disallow transitive dependencies on k8s.io/kubernetes
+ loopback_deps=()
+ kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' || true)
+-if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} ]]; then
++## Allow apiserver-library-go to depend on k8s.io/kubernetes
++if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} && ! "${loopback_deps[*]}" =~ github.com/openshift/apiserver-library-go ]]; then
+   kube::log::error "Disallowed transitive k8s.io/kubernetes dependencies exist via the following imports:" >&22 2>&1
+   kube::log::error "${loopback_deps[@]}" >&22 2>&1
+   exit 1
+@@ -400,7 +401,7 @@ hack/update-vendor-licenses.sh
  kube::log::status "vendor: creating OWNERS file" >&11
  rm -f "vendor/OWNERS"
  cat <<__EOF__ > "vendor/OWNERS"
@@ -3857,7 +3869,7 @@ index 00000000000..951c880085e
 +package generated
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
 new file mode 100644
-index 00000000000..3d8c6af1a31
+index 00000000000..bc1607135fe
 --- /dev/null
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -0,0 +1,383 @@
