@@ -1,4 +1,4 @@
-From de3833057ed510175d868b31235b1c9c431d3c73 Mon Sep 17 00:00:00 2001
+From bd779b677bdae59b164fed161a72031ae7af4ffd Mon Sep 17 00:00:00 2001
 From: Peter Hunt~ <pehunt@redhat.com>
 Date: Mon, 20 Mar 2023 11:43:25 -0400
 Subject: [PATCH] UPSTREAM: <carry>: disable load balancing on created cgroups
@@ -19,12 +19,22 @@ affect the actual scheduling decisions of the kernel. All it will do is open the
 disabled for containers that request it.
 
 Signed-off-by: Peter Hunt <pehunt@redhat.com>
+
+UPSTREAM: <carry>: kubelet/cm: disable cpu load balancing on slices when using static cpu manager policy
+
+There are situations where cpu load balance disabling is desired when the kubelet is not in managed state.
+Instead of using that condition, set the cpu load balancing parameter for new slices when the cpu policy is static
+
+Signed-off-by: Peter Hunt <pehunt@redhat.com>
 ---
- pkg/kubelet/cm/cgroup_manager_linux.go | 15 +++++++++++++++
- 1 file changed, 15 insertions(+)
+ pkg/kubelet/cm/cgroup_manager_linux.go       | 22 ++++++++++++++++++++
+ pkg/kubelet/cm/cgroup_manager_unsupported.go |  3 +++
+ pkg/kubelet/cm/container_manager_linux.go    |  3 +++
+ pkg/kubelet/cm/types.go                      |  2 ++
+ 4 files changed, 30 insertions(+)
 
 diff --git a/pkg/kubelet/cm/cgroup_manager_linux.go b/pkg/kubelet/cm/cgroup_manager_linux.go
-index c4be02a45b2..bc069e1d24a 100644
+index f54eaa2979f..04a03f9845a 100644
 --- a/pkg/kubelet/cm/cgroup_manager_linux.go
 +++ b/pkg/kubelet/cm/cgroup_manager_linux.go
 @@ -27,6 +27,7 @@ import (
@@ -35,22 +45,25 @@ index c4be02a45b2..bc069e1d24a 100644
  	libcontainercgroups "github.com/opencontainers/runc/libcontainer/cgroups"
  	"github.com/opencontainers/runc/libcontainer/cgroups/fscommon"
  	"github.com/opencontainers/runc/libcontainer/cgroups/manager"
-@@ -39,6 +40,7 @@ import (
- 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
- 	"k8s.io/apimachinery/pkg/util/sets"
- 	cmutil "k8s.io/kubernetes/pkg/kubelet/cm/util"
-+	"k8s.io/kubernetes/pkg/kubelet/managed"
- 	"k8s.io/kubernetes/pkg/kubelet/metrics"
- )
+@@ -150,6 +151,10 @@ type cgroupManagerImpl struct {
  
-@@ -475,6 +477,19 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
+ 	// useSystemd tells if systemd cgroup manager should be used.
+ 	useSystemd bool
++
++	// cpuLoadBalanceDisable tells whether kubelet should disable
++	// cpu load balancing on new cgroups it creates.
++	cpuLoadBalanceDisable bool
+ }
+ 
+ // Make sure that cgroupManagerImpl implements the CgroupManager interface
+@@ -476,6 +481,19 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
  		utilruntime.HandleError(fmt.Errorf("cgroup manager.Set failed: %w", err))
  	}
  
-+	// Disable cpuset.sched_load_balance for all cgroups Kubelet creates when kubelet has workloads to manage.
++	// Disable cpuset.sched_load_balance for all cgroups Kubelet creates.
 +	// This way, CRI can disable sched_load_balance for pods that must have load balance
 +	// disabled, but the slices can contain all cpus (as the guaranteed cpus are known dynamically).
-+	if managed.IsEnabled() && !libcontainercgroups.IsCgroup2UnifiedMode() {
++	if m.cpuLoadBalanceDisable && !libcontainercgroups.IsCgroup2UnifiedMode() {
 +		path := manager.Path("cpuset")
 +		if path == "" {
 +			return fmt.Errorf("Failed to find cpuset for newly created cgroup")
@@ -63,6 +76,55 @@ index c4be02a45b2..bc069e1d24a 100644
  	return nil
  }
  
+@@ -747,3 +765,7 @@ func (m *cgroupManagerImpl) SetCgroupConfig(name CgroupName, resource v1.Resourc
+ 	}
+ 	return nil
+ }
++
++func (m *cgroupManagerImpl) SetCPULoadBalanceDisable() {
++	m.cpuLoadBalanceDisable = true
++}
+diff --git a/pkg/kubelet/cm/cgroup_manager_unsupported.go b/pkg/kubelet/cm/cgroup_manager_unsupported.go
+index 976a6c48c42..760dc6b096e 100644
+--- a/pkg/kubelet/cm/cgroup_manager_unsupported.go
++++ b/pkg/kubelet/cm/cgroup_manager_unsupported.go
+@@ -89,6 +89,9 @@ func (m *unsupportedCgroupManager) SetCgroupConfig(name CgroupName, resource v1.
+ 	return errNotSupported
+ }
+ 
++func (m *unsupportedCgroupManager) SetCPULoadBalanceDisable() {
++}
++
+ var RootCgroupName = CgroupName([]string{})
+ 
+ func NewCgroupName(base CgroupName, components ...string) CgroupName {
+diff --git a/pkg/kubelet/cm/container_manager_linux.go b/pkg/kubelet/cm/container_manager_linux.go
+index 18001ed61f6..24bf4f4285b 100644
+--- a/pkg/kubelet/cm/container_manager_linux.go
++++ b/pkg/kubelet/cm/container_manager_linux.go
+@@ -248,6 +248,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
+ 	// Turn CgroupRoot from a string (in cgroupfs path format) to internal CgroupName
+ 	cgroupRoot := ParseCgroupfsToCgroupName(nodeConfig.CgroupRoot)
+ 	cgroupManager := NewCgroupManager(subsystems, nodeConfig.CgroupDriver)
++	if nodeConfig.CPUManagerPolicy == string(cpumanager.PolicyStatic) {
++		cgroupManager.SetCPULoadBalanceDisable()
++	}
+ 	// Check if Cgroup-root actually exists on the node
+ 	if nodeConfig.CgroupsPerQOS {
+ 		// this does default to / when enabled, but this tests against regressions.
+diff --git a/pkg/kubelet/cm/types.go b/pkg/kubelet/cm/types.go
+index aff4c20d429..01011900a60 100644
+--- a/pkg/kubelet/cm/types.go
++++ b/pkg/kubelet/cm/types.go
+@@ -88,6 +88,8 @@ type CgroupManager interface {
+ 	GetCgroupConfig(name CgroupName, resource v1.ResourceName) (*ResourceConfig, error)
+ 	// Set resource config for the specified resource type on the cgroup
+ 	SetCgroupConfig(name CgroupName, resource v1.ResourceName, resourceConfig *ResourceConfig) error
++	// Toggle whether CPU load balancing should be disabled for new cgroups the kubelet creates
++	SetCPULoadBalanceDisable()
+ }
+ 
+ // QOSContainersInfo stores the names of containers per qos
 -- 
-2.40.1
+2.41.0
 
