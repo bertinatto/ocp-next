@@ -1,4 +1,4 @@
-From ba232710f73f270975a6b83706701b861dd4e002 Mon Sep 17 00:00:00 2001
+From 0bb9bc81f692df794255775074d3b8a1a28531fb Mon Sep 17 00:00:00 2001
 From: Maciej Szulik <maszulik@redhat.com>
 Date: Wed, 22 Feb 2023 13:43:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Create minimal wrapper needed to run k8s
@@ -9,6 +9,8 @@ UPSTREAM: <carry>: Change annotation mechanics to allow injecting testMaps and f
 UPSTREAM: <carry>: Move k8s-specific rules to our fork
 
 UPSTREAM: <carry>: Create minimal wrapper needed to run k8s e2e tests
+
+UPSTREAM: <carry>: Create minimal wrapper needed to run k8s e2e tests
 ---
  hack/lib/golang.sh                            |   3 +-
  openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 +++++++++++
@@ -17,11 +19,11 @@ UPSTREAM: <carry>: Create minimal wrapper needed to run k8s e2e tests
  openshift-hack/cmd/k8s-tests/types.go         |  69 ++++++++
  openshift-hack/e2e/annotate/annotate.go       |  17 +-
  openshift-hack/e2e/annotate/cmd/main.go       |   2 +-
- openshift-hack/e2e/annotate/rules.go          | 130 +++++++++++++-
+ openshift-hack/e2e/annotate/rules.go          | 135 ++++++++++++++-
  openshift-hack/e2e/annotate/rules_test.go     |   2 +-
  openshift-hack/e2e/namespace.go               | 160 ++++++++++++++++++
  .../images/hyperkube/Dockerfile.rhel          |   4 +-
- 11 files changed, 760 insertions(+), 12 deletions(-)
+ 11 files changed, 764 insertions(+), 13 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests/k8s-tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests/provider.go
  create mode 100644 openshift-hack/cmd/k8s-tests/runtest.go
@@ -155,7 +157,7 @@ index 00000000000..fedd8b16f01
 +}
 diff --git a/openshift-hack/cmd/k8s-tests/provider.go b/openshift-hack/cmd/k8s-tests/provider.go
 new file mode 100644
-index 00000000000..48ee23fce76
+index 00000000000..cdc948a45c6
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests/provider.go
 @@ -0,0 +1,147 @@
@@ -262,7 +264,7 @@ index 00000000000..48ee23fce76
 +
 +	// Ensure that Kube tests run privileged (like they do upstream)
 +	testContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
-+		return e2e.CreateTestingNS(baseName, c, labels, true)
++		return e2e.CreateTestingNS(ctx, baseName, c, labels, true)
 +	}
 +
 +	gomega.RegisterFailHandler(ginkgo.Fail)
@@ -592,18 +594,19 @@ index 54066dc105b..c1666ce9e04 100644
 +	annotate.Run(annotate.TestMaps, func(name string) bool { return false })
  }
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index 1e967029652..7879296b579 100644
+index b243fd9cb99..ce2e8c14913 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -35,7 +35,6 @@ var (
+@@ -36,8 +36,6 @@ var (
+ 			`\[Feature:GPUDevicePlugin\]`,
  			`\[sig-scheduling\] GPUDevicePluginAcrossRecreate \[Feature:Recreate\]`,
  
- 			`\[Feature:ImageQuota\]`,                    // Quota isn't turned on by default, we should do that and then reenable these tests
+-			`\[Feature:ImageQuota\]`,                    // Quota isn't turned on by default, we should do that and then reenable these tests
 -			`\[Feature:Audit\]`,                         // Needs special configuration
  			`\[Feature:LocalStorageCapacityIsolation\]`, // relies on a separate daemonset?
  			`\[sig-cloud-provider-gcp\]`,                // these test require a different configuration - note that GCE tests from the sig-cluster-lifecycle were moved to the sig-cloud-provider-gcpcluster lifecycle see https://github.com/kubernetes/kubernetes/commit/0b3d50b6dccdc4bbd0b3e411c648b092477d79ac#diff-3b1910d08fb8fd8b32956b5e264f87cb
  
-@@ -111,7 +110,40 @@ var (
+@@ -113,7 +111,40 @@ var (
  			`Netpol \[LinuxOnly\] NetworkPolicy between server and client using UDP should enforce policy based on Ports`,
  			`Netpol \[LinuxOnly\] NetworkPolicy between server and client using UDP should enforce policy to allow traffic only from a pod in a different namespace based on PodSelector and NamespaceSelector`,
  
@@ -644,7 +647,18 @@ index 1e967029652..7879296b579 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -127,6 +159,16 @@ var (
+@@ -121,6 +152,10 @@ var (
+ 			`DNS HostNetwork should resolve DNS of partial qualified names for services on hostNetwork pods with dnsPolicy`,
+ 			`\[sig-network\] Connectivity Pod Lifecycle should be able to connect to other Pod from a terminating Pod`, // TODO(network): simple test in k8s 1.27, needs investigation
+ 			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`,                    // TODO(workloads): alpha feature in k8s 1.27. It's failing with `error: unknown flag: --applyset`. Needs investigation
++
++			// https://issues.redhat.com/browse/OCPBUGS-13392
++			`\[sig-network\] NetworkPolicyLegacy \[LinuxOnly\] NetworkPolicy between server and client should enforce policy to allow traffic only from a pod in a different namespace based on PodSelector and NamespaceSelector`,
++			`\[sig-network\] NetworkPolicyLegacy \[LinuxOnly\] NetworkPolicy between server and client should enforce updated policy`,
+ 		},
+ 		// tests that may work, but we don't support them
+ 		"[Disabled:Unsupported]": {
+@@ -129,6 +164,16 @@ var (
  			`\[Driver: gluster\]`,       // OpenShift 4.x does not support Gluster
  			`Volumes GlusterFS`,         // OpenShift 4.x does not support Gluster
  			`GlusterDynamicProvisioner`, // OpenShift 4.x does not support Gluster
@@ -661,7 +675,7 @@ index 1e967029652..7879296b579 100644
  		},
  		// tests too slow to be part of conformance
  		"[Slow]": {
-@@ -160,6 +202,13 @@ var (
+@@ -162,6 +207,13 @@ var (
  
  			`\[sig-network\] IngressClass \[Feature:Ingress\] should set default value on new IngressClass`, //https://bugzilla.redhat.com/show_bug.cgi?id=1833583
  		},
@@ -675,7 +689,7 @@ index 1e967029652..7879296b579 100644
  		"[Skipped:azure]": {
  			"Networking should provide Internet connection for containers", // Azure does not allow ICMP traffic to internet.
  			// Azure CSI migration changed how we treat regions without zones.
-@@ -230,6 +279,85 @@ var (
+@@ -232,6 +284,85 @@ var (
  			`NetworkPolicy between server and client should support a 'default-deny-all' policy`,            // uses egress feature
  			`NetworkPolicy between server and client should stop enforcing policies after they are deleted`, // uses egress feature
  		},
@@ -776,7 +790,7 @@ index dd05c1a3ace..b929a573d90 100644
  			}
 diff --git a/openshift-hack/e2e/namespace.go b/openshift-hack/e2e/namespace.go
 new file mode 100644
-index 00000000000..7c3ba70dfa3
+index 00000000000..d82fabb56d3
 --- /dev/null
 +++ b/openshift-hack/e2e/namespace.go
 @@ -0,0 +1,160 @@
@@ -805,7 +819,7 @@ index 00000000000..7c3ba70dfa3
 +)
 +
 +// CreateTestingNS ensures that kubernetes e2e tests have their service accounts in the privileged and anyuid SCCs
-+func CreateTestingNS(baseName string, c kclientset.Interface, labels map[string]string, isKubeNamespace bool) (*corev1.Namespace, error) {
++func CreateTestingNS(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string, isKubeNamespace bool) (*corev1.Namespace, error) {
 +	if !strings.HasPrefix(baseName, "e2e-") {
 +		baseName = "e2e-" + baseName
 +	}
@@ -817,7 +831,7 @@ index 00000000000..7c3ba70dfa3
 +		labels["security.openshift.io/disable-securitycontextconstraints"] = "true"
 +	}
 +
-+	ns, err := framework.CreateTestingNS(context.Background(), baseName, c, labels)
++	ns, err := framework.CreateTestingNS(ctx, baseName, c, labels)
 +	if err != nil {
 +		return ns, err
 +	}
@@ -839,14 +853,14 @@ index 00000000000..7c3ba70dfa3
 +	framework.Logf("About to run a Kube e2e test, ensuring namespace/%s is privileged", ns.Name)
 +	// add the "privileged" scc to ensure pods that explicitly
 +	// request extra capabilities are not rejected
-+	addE2EServiceAccountsToSCC(securityClient, []corev1.Namespace{*ns}, "privileged")
++	addE2EServiceAccountsToSCC(ctx, securityClient, []corev1.Namespace{*ns}, "privileged")
 +	// add the "anyuid" scc to ensure pods that don't specify a
 +	// uid don't get forced into a range (mimics upstream
 +	// behavior)
-+	addE2EServiceAccountsToSCC(securityClient, []corev1.Namespace{*ns}, "anyuid")
++	addE2EServiceAccountsToSCC(ctx, securityClient, []corev1.Namespace{*ns}, "anyuid")
 +	// add the "hostmount-anyuid" scc to ensure pods using hostPath
 +	// can execute tests
-+	addE2EServiceAccountsToSCC(securityClient, []corev1.Namespace{*ns}, "hostmount-anyuid")
++	addE2EServiceAccountsToSCC(ctx, securityClient, []corev1.Namespace{*ns}, "hostmount-anyuid")
 +
 +	// The intra-pod test requires that the service account have
 +	// permission to retrieve service endpoints.
@@ -854,10 +868,10 @@ index 00000000000..7c3ba70dfa3
 +	if err != nil {
 +		return ns, err
 +	}
-+	addRoleToE2EServiceAccounts(rbacClient, []corev1.Namespace{*ns}, "view")
++	addRoleToE2EServiceAccounts(ctx, rbacClient, []corev1.Namespace{*ns}, "view")
 +
 +	// in practice too many kube tests ignore scheduling constraints
-+	allowAllNodeScheduling(c, ns.Name)
++	allowAllNodeScheduling(ctx, c, ns.Name)
 +
 +	return ns, err
 +}
@@ -865,11 +879,11 @@ index 00000000000..7c3ba70dfa3
 +var longRetry = wait.Backoff{Steps: 100}
 +
 +// TODO: ideally this should be rewritten to use dynamic client, not to rely on openshift types
-+func addE2EServiceAccountsToSCC(securityClient securityv1client.Interface, namespaces []corev1.Namespace, sccName string) {
++func addE2EServiceAccountsToSCC(ctx context.Context, securityClient securityv1client.Interface, namespaces []corev1.Namespace, sccName string) {
 +	// Because updates can race, we need to set the backoff retries to be > than the number of possible
 +	// parallel jobs starting at once. Set very high to allow future high parallelism.
 +	err := retry.RetryOnConflict(longRetry, func() error {
-+		scc, err := securityClient.SecurityV1().SecurityContextConstraints().Get(context.Background(), sccName, metav1.GetOptions{})
++		scc, err := securityClient.SecurityV1().SecurityContextConstraints().Get(ctx, sccName, metav1.GetOptions{})
 +		if err != nil {
 +			if apierrs.IsNotFound(err) {
 +				return nil
@@ -880,7 +894,7 @@ index 00000000000..7c3ba70dfa3
 +		for _, ns := range namespaces {
 +			scc.Groups = append(scc.Groups, fmt.Sprintf("system:serviceaccounts:%s", ns.Name))
 +		}
-+		if _, err := securityClient.SecurityV1().SecurityContextConstraints().Update(context.Background(), scc, metav1.UpdateOptions{}); err != nil {
++		if _, err := securityClient.SecurityV1().SecurityContextConstraints().Update(ctx, scc, metav1.UpdateOptions{}); err != nil {
 +			return err
 +		}
 +		return nil
@@ -896,11 +910,11 @@ index 00000000000..7c3ba70dfa3
 +	framework.Failf("%v", msg)
 +}
 +
-+func addRoleToE2EServiceAccounts(rbacClient rbacv1client.RbacV1Interface, namespaces []corev1.Namespace, roleName string) {
++func addRoleToE2EServiceAccounts(ctx context.Context, rbacClient rbacv1client.RbacV1Interface, namespaces []corev1.Namespace, roleName string) {
 +	err := retry.RetryOnConflict(longRetry, func() error {
 +		for _, ns := range namespaces {
 +			if ns.Status.Phase != corev1.NamespaceTerminating {
-+				_, err := rbacClient.RoleBindings(ns.Name).Create(context.Background(), &rbacv1.RoleBinding{
++				_, err := rbacClient.RoleBindings(ns.Name).Create(ctx, &rbacv1.RoleBinding{
 +					ObjectMeta: metav1.ObjectMeta{GenerateName: "default-" + roleName, Namespace: ns.Name},
 +					RoleRef: rbacv1.RoleRef{
 +						Kind: "ClusterRole",
@@ -923,9 +937,9 @@ index 00000000000..7c3ba70dfa3
 +}
 +
 +// allowAllNodeScheduling sets the annotation on namespace that allows all nodes to be scheduled onto.
-+func allowAllNodeScheduling(c kclientset.Interface, namespace string) {
++func allowAllNodeScheduling(ctx context.Context, c kclientset.Interface, namespace string) {
 +	err := retry.RetryOnConflict(longRetry, func() error {
-+		ns, err := c.CoreV1().Namespaces().Get(context.Background(), namespace, metav1.GetOptions{})
++		ns, err := c.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 +		if err != nil {
 +			return err
 +		}
@@ -933,7 +947,7 @@ index 00000000000..7c3ba70dfa3
 +			ns.Annotations = make(map[string]string)
 +		}
 +		ns.Annotations[projectv1.ProjectNodeSelector] = ""
-+		_, err = c.CoreV1().Namespaces().Update(context.Background(), ns, metav1.UpdateOptions{})
++		_, err = c.CoreV1().Namespaces().Update(ctx, ns, metav1.UpdateOptions{})
 +		return err
 +	})
 +	if err != nil {
@@ -941,7 +955,7 @@ index 00000000000..7c3ba70dfa3
 +	}
 +}
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
-index 89a30c4c2f9..c763f726eda 100644
+index 648310ed996..e89b9535910 100644
 --- a/openshift-hack/images/hyperkube/Dockerfile.rhel
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
 @@ -1,10 +1,10 @@
@@ -958,5 +972,5 @@ index 89a30c4c2f9..c763f726eda 100644
  
  FROM registry.ci.openshift.org/ocp/4.14:base
 -- 
-2.40.1
+2.41.0
 
