@@ -1,6 +1,6 @@
-From a6bb409b39aa655ad17200e3e0ab698da9155749 Mon Sep 17 00:00:00 2001
+From f1fe3e769fd8dcd89832219a8016ba1425df809e Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
-Date: Thu, 29 Oct 2020 13:55:57 +0100
+Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
  kube-apiserver patches
 
@@ -204,9 +204,16 @@ This validates that nodes that wish to join the cluster are first configured to 
 For more information see - https://github.com/openshift/enhancements/pull/1213
 
 Signed-off-by: ehila <ehila@redhat.com>
+
+UPSTREAM: <carry>: kube-apiserver: allow injection of kube-apiserver options
+
+UPSTREAM: <carry>: kube-apiserver: allow rewiring
+
+OpenShift-Rebase-Source: 56b49c9c143
+OpenShift-Rebase-Source: bcf574c65d1
 ---
- cmd/kube-apiserver/app/patch_openshift.go     |  33 -
- cmd/kube-apiserver/app/server.go              |  34 +-
+ cmd/kube-apiserver/app/options/options.go     |   6 +
+ cmd/kube-apiserver/app/server.go              |  42 +
  .../admissionenablement/admission.go          |  15 +
  .../admissionenablement/admission_config.go   |  51 +
  .../admission/admissionenablement/register.go | 123 +++
@@ -389,10 +396,11 @@ Signed-off-by: ehila <ehila@redhat.com>
  pkg/kubeapiserver/authorizer/modes/patch.go   |   8 +
  pkg/kubeapiserver/authorizer/patch.go         |   8 +
  .../rbac/bootstrappolicy/controller_policy.go |   2 +
+ .../rbac/bootstrappolicy/patch_policy.go      |  65 ++
+ .../authorizer/rbac/bootstrappolicy/policy.go |   6 +-
  .../testdata/controller-roles.yaml            |  12 +
  .../go-runner/testdata/tartest/out.tar.gz     | Bin 0 -> 174 bytes
- 186 files changed, 19354 insertions(+), 49 deletions(-)
- delete mode 100644 cmd/kube-apiserver/app/patch_openshift.go
+ 188 files changed, 19448 insertions(+), 7 deletions(-)
  create mode 100644 openshift-kube-apiserver/admission/admissionenablement/admission.go
  create mode 100644 openshift-kube-apiserver/admission/admissionenablement/admission_config.go
  create mode 100644 openshift-kube-apiserver/admission/admissionenablement/register.go
@@ -572,90 +580,71 @@ Signed-off-by: ehila <ehila@redhat.com>
  create mode 100644 openshift-kube-apiserver/openshiftkubeapiserver/wellknown_oauth.go
  create mode 100644 pkg/kubeapiserver/authorizer/modes/patch.go
  create mode 100644 pkg/kubeapiserver/authorizer/patch.go
+ create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
  create mode 100644 test/conformance/image/go-runner/testdata/tartest/out.tar.gz
 
-diff --git a/cmd/kube-apiserver/app/patch_openshift.go b/cmd/kube-apiserver/app/patch_openshift.go
-deleted file mode 100644
-index c1183c3e7f4..00000000000
---- a/cmd/kube-apiserver/app/patch_openshift.go
-+++ /dev/null
-@@ -1,33 +0,0 @@
--package app
--
--import (
--	"k8s.io/apiserver/pkg/admission"
--	genericapiserver "k8s.io/apiserver/pkg/server"
--	clientgoinformers "k8s.io/client-go/informers"
--	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
--	"k8s.io/kubernetes/pkg/master"
--)
--
--var OpenShiftKubeAPIServerConfigPatch openshiftkubeapiserver.KubeAPIServerConfigFunc = nil
--
--type KubeAPIServerServerFunc func(server *master.Master) error
--
--func PatchKubeAPIServerConfig(config *genericapiserver.Config, versionedInformers clientgoinformers.SharedInformerFactory, pluginInitializers *[]admission.PluginInitializer) (genericapiserver.DelegationTarget, error) {
--	if OpenShiftKubeAPIServerConfigPatch == nil {
--		return genericapiserver.NewEmptyDelegate(), nil
--	}
--
--	return OpenShiftKubeAPIServerConfigPatch(config, versionedInformers, pluginInitializers)
--}
--
--var OpenShiftKubeAPIServerServerPatch KubeAPIServerServerFunc = nil
--
--func PatchKubeAPIServerServer(server *master.Master) error {
--	if OpenShiftKubeAPIServerServerPatch == nil {
--		return nil
--	}
--
--	return OpenShiftKubeAPIServerServerPatch(server)
--}
--
--var StartingDelegate genericapiserver.DelegationTarget = genericapiserver.NewEmptyDelegate()
+diff --git a/cmd/kube-apiserver/app/options/options.go b/cmd/kube-apiserver/app/options/options.go
+index d40c4282fed..eaa78728b4b 100644
+--- a/cmd/kube-apiserver/app/options/options.go
++++ b/cmd/kube-apiserver/app/options/options.go
+@@ -60,6 +60,8 @@ type Extra struct {
+ 	EndpointReconcilerType string
+ 
+ 	MasterCount int
++
++	OpenShiftConfig string
+ }
+ 
+ // NewServerRunOptions creates a new ServerRunOptions object with default parameters
+@@ -153,5 +155,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
+ 		"The number of apiservers running in the cluster, must be a positive number. (In use when --endpoint-reconciler-type=master-count is enabled.)")
+ 	fs.MarkDeprecated("apiserver-count", "apiserver-count is deprecated and will be removed in a future version.")
+ 
++	fs.StringVar(&s.OpenShiftConfig, "openshift-config", s.OpenShiftConfig, "config for openshift")
++	fs.MarkDeprecated("openshift-config", "to be removed")
++	fs.MarkHidden("openshift-config")
++
+ 	return fss
+ }
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index d5cf337f160..9c30087374a 100644
+index 807c169631f..ac8e342316e 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -26,6 +26,7 @@ import (
+@@ -26,6 +26,10 @@ import (
  	"net/url"
  	"os"
  
 +	"k8s.io/kubernetes/openshift-kube-apiserver/admission/admissionenablement"
- 	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
- 	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
++	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
++	"k8s.io/kubernetes/openshift-kube-apiserver/openshiftkubeapiserver"
++
+ 	"github.com/spf13/cobra"
  
-@@ -108,28 +109,32 @@ cluster's shared state through which all other components interact.`,
+ 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+@@ -103,6 +107,35 @@ cluster's shared state through which all other components interact.`,
+ 			}
  			cliflag.PrintFlags(fs)
  
- 			if len(s.OpenShiftConfig) > 0 {
--				enablement.ForceOpenShift()
++			if len(s.OpenShiftConfig) > 0 {
 +				// if we are running openshift, we modify the admission chain defaults accordingly
 +				admissionenablement.InstallOpenShiftAdmissionPlugins(s)
 +
- 				openshiftConfig, err := enablement.GetOpenshiftConfig(s.OpenShiftConfig)
- 				if err != nil {
- 					klog.Fatal(err)
- 				}
--
--				// this forces a patch to be called
--				// TODO we're going to try to remove bits of the patching.
--				configPatchFn, serverPatchContext := openshiftkubeapiserver.NewOpenShiftKubeAPIServerConfigPatch(genericapiserver.NewEmptyDelegate(), openshiftConfig)
--				OpenShiftKubeAPIServerConfigPatch = configPatchFn
--				OpenShiftKubeAPIServerServerPatch = serverPatchContext.PatchServer
++				openshiftConfig, err := enablement.GetOpenshiftConfig(s.OpenShiftConfig)
++				if err != nil {
++					klog.Fatal(err)
++				}
 +				enablement.ForceOpenShift(openshiftConfig)
- 
- 				args, err := openshiftkubeapiserver.ConfigToFlags(openshiftConfig)
- 				if err != nil {
- 					return err
- 				}
 +
- 				// hopefully this resets the flags?
- 				if err := cmd.ParseFlags(args); err != nil {
- 					return err
- 				}
- 
--				enablement.ForceGlobalInitializationForOpenShift(s)
++				args, err := openshiftkubeapiserver.ConfigToFlags(openshiftConfig)
++				if err != nil {
++					return err
++				}
++
++				// hopefully this resets the flags?
++				if err := cmd.ParseFlags(args); err != nil {
++					return err
++				}
++
 +				// print merged flags (merged from OpenshiftConfig)
 +				cliflag.PrintFlags(cmd.Flags())
 +
@@ -663,21 +652,12 @@ index d5cf337f160..9c30087374a 100644
 +			} else {
 +				// print default flags
 +				cliflag.PrintFlags(cmd.Flags())
- 			}
- 
++			}
++
  			// set default options
-@@ -213,10 +218,6 @@ func CreateServerChain(config CompletedConfig) (*aggregatorapiserver.APIAggregat
- 		return nil, err
- 	}
- 
--	if err := PatchKubeAPIServerServer(kubeAPIServer); err != nil {
--		return nil, err
--	}
--
- 	// aggregator comes last in the chain
- 	aggregatorServer, err := createAggregatorServer(config.Aggregator, kubeAPIServer.GenericAPIServer, apiExtensionsServer.Informers, crdAPIEnabled)
- 	if err != nil {
-@@ -330,6 +331,15 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
+ 			completedOptions, err := s.Complete()
+ 			if err != nil {
+@@ -311,6 +344,15 @@ func CreateKubeAPIServerConfig(opts options.CompletedOptions) (
  	if err != nil {
  		return nil, nil, nil, fmt.Errorf("failed to create real dynamic external client: %w", err)
  	}
@@ -21037,10 +21017,10 @@ index 00000000000..8b34da7aa32
 +	return data, nil
 +}
 diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index af4b82b2657..c40e4fb9551 100644
+index 824469107ea..5d720067644 100644
 --- a/pkg/controlplane/apiserver/config.go
 +++ b/pkg/controlplane/apiserver/config.go
-@@ -46,6 +46,8 @@ import (
+@@ -52,6 +52,8 @@ import (
  	"k8s.io/kubernetes/pkg/kubeapiserver"
  	"k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes"
  	rbacrest "k8s.io/kubernetes/pkg/registry/rbac/rest"
@@ -21049,7 +21029,7 @@ index af4b82b2657..c40e4fb9551 100644
  )
  
  // BuildGenericConfig takes the master server options and produces the genericapiserver.Config associated with it
-@@ -128,6 +130,8 @@ func BuildGenericConfig(
+@@ -134,6 +136,8 @@ func BuildGenericConfig(
  	// on a fast local network
  	genericConfig.LoopbackClientConfig.DisableCompression = true
  
@@ -21134,7 +21114,7 @@ index 00000000000..8a095efcf98
 +	skipSystemMastersAuthorizer = true
 +}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-index 5e1b3f85486..dc8ac7022a6 100644
+index 70716a9b348..92b9837a67e 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 @@ -162,6 +162,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
@@ -21153,6 +21133,101 @@ index 5e1b3f85486..dc8ac7022a6 100644
  			eventsRule(),
  		},
  	})
+diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
+new file mode 100644
+index 00000000000..8f91d44c9c8
+--- /dev/null
++++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
+@@ -0,0 +1,65 @@
++package bootstrappolicy
++
++import (
++	rbacv1 "k8s.io/api/rbac/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	rbacv1helpers "k8s.io/kubernetes/pkg/apis/rbac/v1"
++)
++
++var ClusterRoles = clusterRoles
++
++func OpenshiftClusterRoles() []rbacv1.ClusterRole {
++	const (
++		// These are valid under the "nodes" resource
++		NodeMetricsSubresource = "metrics"
++		NodeStatsSubresource   = "stats"
++		NodeSpecSubresource    = "spec"
++		NodeLogSubresource     = "log"
++	)
++
++	roles := clusterRoles()
++	roles = append(roles, []rbacv1.ClusterRole{
++		{
++			ObjectMeta: metav1.ObjectMeta{
++				Name: "system:node-admin",
++			},
++			Rules: []rbacv1.PolicyRule{
++				// Allow read-only access to the API objects
++				rbacv1helpers.NewRule(Read...).Groups(legacyGroup).Resources("nodes").RuleOrDie(),
++				// Allow all API calls to the nodes
++				rbacv1helpers.NewRule("proxy").Groups(legacyGroup).Resources("nodes").RuleOrDie(),
++				rbacv1helpers.NewRule("*").Groups(legacyGroup).Resources("nodes/proxy", "nodes/"+NodeMetricsSubresource, "nodes/"+NodeSpecSubresource, "nodes/"+NodeStatsSubresource, "nodes/"+NodeLogSubresource).RuleOrDie(),
++			},
++		},
++		{
++			ObjectMeta: metav1.ObjectMeta{
++				Name: "system:node-reader",
++			},
++			Rules: []rbacv1.PolicyRule{
++				// Allow read-only access to the API objects
++				rbacv1helpers.NewRule(Read...).Groups(legacyGroup).Resources("nodes").RuleOrDie(),
++				// Allow read access to node metrics
++				rbacv1helpers.NewRule("get").Groups(legacyGroup).Resources("nodes/"+NodeMetricsSubresource, "nodes/"+NodeSpecSubresource).RuleOrDie(),
++				// Allow read access to stats
++				// Node stats requests are submitted as POSTs.  These creates are non-mutating
++				rbacv1helpers.NewRule("get", "create").Groups(legacyGroup).Resources("nodes/" + NodeStatsSubresource).RuleOrDie(),
++				// TODO: expose other things like /healthz on the node once we figure out non-resource URL policy across systems
++			},
++		},
++	}...)
++
++	addClusterRoleLabel(roles)
++	return roles
++}
++
++var ClusterRoleBindings = clusterRoleBindings
++
++func OpenshiftClusterRoleBindings() []rbacv1.ClusterRoleBinding {
++	bindings := clusterRoleBindings()
++	bindings = append(bindings, []rbacv1.ClusterRoleBinding{
++		rbacv1helpers.NewClusterBinding("system:node-admin").Users("system:master", "system:kube-apiserver").Groups("system:node-admins").BindingOrDie(),
++	}...)
++
++	addClusterRoleBindingLabel(bindings)
++	return bindings
++}
+diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
+index 2e0dbdbaddf..c438cb04048 100644
+--- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
++++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
+@@ -189,8 +189,8 @@ func NodeRules() []rbacv1.PolicyRule {
+ 	return nodePolicyRules
+ }
+ 
+-// ClusterRoles returns the cluster roles to bootstrap an API server with
+-func ClusterRoles() []rbacv1.ClusterRole {
++// clusterRoles returns the cluster roles to bootstrap an API server with
++func clusterRoles() []rbacv1.ClusterRole {
+ 	roles := []rbacv1.ClusterRole{
+ 		{
+ 			// a "root" role which can do absolutely anything
+@@ -601,7 +601,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
+ const systemNodeRoleName = "system:node"
+ 
+ // ClusterRoleBindings return default rolebindings to the default roles
+-func ClusterRoleBindings() []rbacv1.ClusterRoleBinding {
++func clusterRoleBindings() []rbacv1.ClusterRoleBinding {
+ 	rolebindings := []rbacv1.ClusterRoleBinding{
+ 		rbacv1helpers.NewClusterBinding("cluster-admin").Groups(user.SystemPrivilegedGroup).BindingOrDie(),
+ 		rbacv1helpers.NewClusterBinding("system:monitoring").Groups(user.MonitoringGroup).BindingOrDie(),
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 index 5493b907811..8dbe0183399 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
