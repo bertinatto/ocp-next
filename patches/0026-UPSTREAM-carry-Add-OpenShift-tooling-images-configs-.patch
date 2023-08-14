@@ -1,4 +1,4 @@
-From 23b36f9cbcd9c62bc48f85f0bf4c0e162596eace Mon Sep 17 00:00:00 2001
+From e1b7b7da4c54a0b6ad7c6cd68cfa49b79dc7acce Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -485,7 +485,7 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
  openshift-hack/build-rpms.sh                  | 130 ++++
  openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 +++
  openshift-hack/cmd/k8s-tests/provider.go      | 147 ++++
- openshift-hack/cmd/k8s-tests/runtest.go       | 140 ++++
+ openshift-hack/cmd/k8s-tests/runtest.go       | 143 ++++
  openshift-hack/cmd/k8s-tests/types.go         |  69 ++
  openshift-hack/commitchecker/commitchecker.go |  39 ++
  openshift-hack/commitchecker/git.go           | 378 ++++++++++
@@ -543,7 +543,7 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 84 files changed, 7700 insertions(+), 42 deletions(-)
+ 84 files changed, 7703 insertions(+), 42 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -2416,15 +2416,16 @@ index 00000000000..cdc948a45c6
 +}
 diff --git a/openshift-hack/cmd/k8s-tests/runtest.go b/openshift-hack/cmd/k8s-tests/runtest.go
 new file mode 100644
-index 00000000000..35a6f2a14d0
+index 00000000000..aea3adc11b5
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests/runtest.go
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,143 @@
 +package main
 +
 +import (
 +	"fmt"
 +	"io"
++	"os"
 +	"regexp"
 +	"strings"
 +	"time"
@@ -2477,18 +2478,20 @@ index 00000000000..35a6f2a14d0
 +
 +	// These settings are matched to upstream's ginkgo configuration. See:
 +	// https://github.com/kubernetes/kubernetes/blob/v1.25.0/test/e2e/framework/test_context.go#L354-L355
-+	// Turn on EmitSpecProgress to get spec progress (especially on interrupt)
-+	suiteConfig.EmitSpecProgress = true
 +	// Randomize specs as well as suites
 +	suiteConfig.RandomizeAllSpecs = true
-+	// turn off stdout/stderr capture see https://github.com/kubernetes/kubernetes/pull/111240
-+	suiteConfig.OutputInterceptorMode = "none"
 +	// https://github.com/kubernetes/kubernetes/blob/v1.25.0/hack/ginkgo-e2e.sh#L172-L173
 +	suiteConfig.Timeout = 24 * time.Hour
 +	reporterConfig.NoColor = true
++	reporterConfig.Verbose = true
 +
 +	ginkgo.SetReporterConfig(reporterConfig)
-+	ginkgo.GetSuite().RunSpec(test.spec, ginkgo.Labels{}, "", ginkgo.GetFailer(), ginkgo.GetWriter(), suiteConfig)
++
++	cwd, err := os.Getwd()
++	if err != nil {
++		return err
++	}
++	ginkgo.GetSuite().RunSpec(test.spec, ginkgo.Labels{}, "Kubernetes e2e suite", cwd, ginkgo.GetFailer(), ginkgo.GetWriter(), suiteConfig, reporterConfig)
 +
 +	var summary types.SpecReport
 +	for _, report := range ginkgo.GetSuite().GetReport().SpecReports {
