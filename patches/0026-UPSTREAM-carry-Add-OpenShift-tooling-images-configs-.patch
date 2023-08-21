@@ -1,4 +1,4 @@
-From e1b7b7da4c54a0b6ad7c6cd68cfa49b79dc7acce Mon Sep 17 00:00:00 2001
+From aaf96cc82277b4cf792a362562a143aaf97486c4 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -458,6 +458,10 @@ UPSTREAM: <carry>: UserNamespacesSupport feature was rename to UserNamespacesSta
 See commit 531d38e323c54378acd8ea664f5752d31e8ee27a.
 
 UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+Use commitchecker from github.com/openshift/build-machiner-go.
 ---
  .ci-operator.yaml                             |   4 +
  .gitignore                                    |   7 +
@@ -487,11 +491,6 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
  openshift-hack/cmd/k8s-tests/provider.go      | 147 ++++
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 ++++
  openshift-hack/cmd/k8s-tests/types.go         |  69 ++
- openshift-hack/commitchecker/commitchecker.go |  39 ++
- openshift-hack/commitchecker/git.go           | 378 ++++++++++
- openshift-hack/commitchecker/git_test.go      |  55 ++
- openshift-hack/commitchecker/validate.go      |  82 +++
- openshift-hack/commitchecker/validate_test.go |  94 +++
  openshift-hack/conformance-k8s.sh             |  96 +++
  .../create-or-update-rebase-branch.sh         |  67 ++
  openshift-hack/e2e/annotate/annotate.go       | 290 ++++++++
@@ -536,14 +535,14 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
  openshift-hack/test-kubernetes-e2e.sh         |  88 +++
  openshift-hack/update-kubensenter.sh          | 139 ++++
  openshift-hack/update-test-annotations.sh     |  13 +
- openshift-hack/verify-commits.sh              |  22 +
+ openshift-hack/verify-commits.sh              |  30 +
  openshift-hack/verify-kubensenter.sh          |  12 +
  openshift-hack/verify-test-annotations.sh     |  12 +
  openshift-hack/verify.sh                      |  26 +
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 84 files changed, 7703 insertions(+), 42 deletions(-)
+ 79 files changed, 7063 insertions(+), 42 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -560,11 +559,6 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
  create mode 100644 openshift-hack/cmd/k8s-tests/provider.go
  create mode 100644 openshift-hack/cmd/k8s-tests/runtest.go
  create mode 100644 openshift-hack/cmd/k8s-tests/types.go
- create mode 100644 openshift-hack/commitchecker/commitchecker.go
- create mode 100644 openshift-hack/commitchecker/git.go
- create mode 100644 openshift-hack/commitchecker/git_test.go
- create mode 100644 openshift-hack/commitchecker/validate.go
- create mode 100644 openshift-hack/commitchecker/validate_test.go
  create mode 100755 openshift-hack/conformance-k8s.sh
  create mode 100755 openshift-hack/create-or-update-rebase-branch.sh
  create mode 100644 openshift-hack/e2e/annotate/annotate.go
@@ -2416,7 +2410,7 @@ index 00000000000..cdc948a45c6
 +}
 diff --git a/openshift-hack/cmd/k8s-tests/runtest.go b/openshift-hack/cmd/k8s-tests/runtest.go
 new file mode 100644
-index 00000000000..aea3adc11b5
+index 00000000000..0abff33438f
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests/runtest.go
 @@ -0,0 +1,143 @@
@@ -2637,684 +2631,6 @@ index 00000000000..29a0b5b5efa
 +
 +func (e ExitError) Error() string {
 +	return fmt.Sprintf("exit with code %d", e.Code)
-+}
-diff --git a/openshift-hack/commitchecker/commitchecker.go b/openshift-hack/commitchecker/commitchecker.go
-new file mode 100644
-index 00000000000..1b2395d4a7c
---- /dev/null
-+++ b/openshift-hack/commitchecker/commitchecker.go
-@@ -0,0 +1,39 @@
-+package main
-+
-+import (
-+	"flag"
-+	"fmt"
-+	"os"
-+)
-+
-+func main() {
-+	var start, end string
-+	flag.StringVar(&start, "start", "master", "The start of the revision range for analysis")
-+	flag.StringVar(&end, "end", "HEAD", "The end of the revision range for analysis")
-+	flag.Parse()
-+
-+	commits, err := CommitsBetween(start, end)
-+	if err != nil {
-+		if err == ErrNotCommit {
-+			_, _ = fmt.Fprintf(os.Stderr, "WARNING: one of the provided commits does not exist, not a true branch\n")
-+			os.Exit(0)
-+		}
-+		_, _ = fmt.Fprintf(os.Stderr, "ERROR: couldn't find commits from %s..%s: %v\n", start, end, err)
-+		os.Exit(1)
-+	}
-+
-+	var errs []string
-+	for _, validate := range AllCommitValidators {
-+		for _, commit := range commits {
-+			errs = append(errs, validate(commit)...)
-+		}
-+	}
-+
-+	if len(errs) > 0 {
-+		for _, e := range errs {
-+			_, _ = fmt.Fprintf(os.Stderr, "%s\n\n", e)
-+		}
-+
-+		os.Exit(2)
-+	}
-+}
-diff --git a/openshift-hack/commitchecker/git.go b/openshift-hack/commitchecker/git.go
-new file mode 100644
-index 00000000000..a9196323993
---- /dev/null
-+++ b/openshift-hack/commitchecker/git.go
-@@ -0,0 +1,378 @@
-+package main
-+
-+import (
-+	"bytes"
-+	"fmt"
-+	"os"
-+	"os/exec"
-+	"regexp"
-+	"strings"
-+)
-+
-+var (
-+	MergeSummaryPattern    = regexp.MustCompile(`^Merge commit .*`)
-+	UpstreamSummaryPattern = regexp.MustCompile(`^UPSTREAM: (revert: )?(([\w\.-]+\/[\w-\.-]+)?: )?(\d+:|<carry>:|<drop>:)`)
-+	BumpSummaryPattern     = regexp.MustCompile(`^bump[\(\w].*`)
-+
-+	// patchRegexps holds regexps for paths inside vendor dir that are allowed to be patched directly.
-+	// It must corresponds to published repositories.
-+	PatchRegexps = []*regexp.Regexp{
-+		regexp.MustCompile("^k8s.io/kubernetes/.*"),
-+	}
-+
-+	// supportedHosts maps source hosts to the number of path segments that
-+	// represent the account/repo for that host. This is necessary because we
-+	// can't tell just by looking at an import path whether the repo is identified
-+	// by the first 2 or 3 path segments.
-+	//
-+	// If dependencies are introduced from new hosts, they'll need to be added
-+	// here.
-+	SupportedHosts = map[string]int{
-+		"bitbucket.org":     3,
-+		"cloud.google.com":  2,
-+		"code.google.com":   3,
-+		"github.com":        3,
-+		"golang.org":        3,
-+		"google.golang.org": 2,
-+		"gopkg.in":          2,
-+		"k8s.io":            2,
-+		"speter.net":        2,
-+	}
-+)
-+
-+func RegexpsToStrings(a []*regexp.Regexp) []string {
-+	var res []string
-+	for _, r := range a {
-+		res = append(res, r.String())
-+	}
-+	return res
-+}
-+
-+type File string
-+
-+func (f File) HasVendoredCodeChanges() bool {
-+	return strings.HasPrefix(string(f), "vendor")
-+}
-+
-+func (f File) IsPatch() bool {
-+	if !strings.HasPrefix(string(f), "vendor/") {
-+		return false
-+	}
-+
-+	for _, r := range PatchRegexps {
-+		if r.Match([]byte(strings.TrimPrefix(string(f), "vendor/"))) {
-+			return true
-+		}
-+	}
-+
-+	return false
-+}
-+
-+func (f File) VendorRepo() (string, error) {
-+	if !strings.HasPrefix(string(f), "vendor/") {
-+		return "", fmt.Errorf("file %q doesn't appear to be a vendor change", string(f))
-+	}
-+
-+	p := strings.TrimPrefix(string(f), "vendor/")
-+
-+	parts := strings.Split(p, string(os.PathSeparator))
-+
-+	if len(parts) < 1 {
-+		return "", fmt.Errorf("invalid file %q", string(f))
-+	}
-+
-+	numSegments, ok := SupportedHosts[parts[0]]
-+	if !ok {
-+		return "", fmt.Errorf("unsupported host for file %q", string(f))
-+	}
-+
-+	if numSegments < 1 {
-+		return "", fmt.Errorf("invalid number of segments %d when processing file path %q", numSegments, string(f))
-+	}
-+
-+	return strings.Join(parts[0:numSegments], string(os.PathSeparator)), nil
-+}
-+
-+type Commit struct {
-+	Sha         string
-+	Summary     string
-+	Description []string
-+	Files       []File
-+	Email       string
-+}
-+
-+func (c Commit) MatchesMergeSummaryPattern() bool {
-+	return MergeSummaryPattern.MatchString(c.Summary)
-+}
-+
-+func (c Commit) MatchesUpstreamSummaryPattern() bool {
-+	return UpstreamSummaryPattern.MatchString(c.Summary)
-+}
-+
-+func (c Commit) MatchesBumpSummaryPattern() bool {
-+	return BumpSummaryPattern.MatchString(c.Summary)
-+}
-+
-+func (c Commit) DeclaredUpstreamRepo() (string, error) {
-+	if !c.MatchesUpstreamSummaryPattern() {
-+		return "", fmt.Errorf("commit doesn't match the upstream commit summary pattern")
-+	}
-+	groups := UpstreamSummaryPattern.FindStringSubmatch(c.Summary)
-+	repo := groups[3]
-+	if len(repo) == 0 {
-+		repo = "k8s.io/kubernetes"
-+	}
-+	return repo, nil
-+}
-+
-+func (c Commit) HasVendoredCodeChanges() bool {
-+	for _, file := range c.Files {
-+		if file.HasVendoredCodeChanges() {
-+			return true
-+		}
-+	}
-+	return false
-+}
-+
-+func (c Commit) HasNonVendoredCodeChanges() bool {
-+	for _, file := range c.Files {
-+		if !file.HasVendoredCodeChanges() {
-+			return true
-+		}
-+	}
-+	return false
-+}
-+
-+func (c Commit) HasPatches() bool {
-+	for _, f := range c.Files {
-+		if f.IsPatch() {
-+			return true
-+		}
-+	}
-+	return false
-+}
-+
-+func (c Commit) HasBumpedFiles() bool {
-+	for _, f := range c.Files {
-+		if f.HasVendoredCodeChanges() && !f.IsPatch() {
-+			return true
-+		}
-+	}
-+	return false
-+}
-+
-+func (c Commit) PatchedRepos() ([]string, error) {
-+	var repos []string
-+	seenKeys := map[string]struct{}{}
-+	for _, f := range c.Files {
-+		if f.IsPatch() {
-+			repo, err := f.VendorRepo()
-+			if err != nil {
-+				return nil, err
-+			}
-+			_, ok := seenKeys[repo]
-+			if !ok {
-+				repos = append(repos, repo)
-+				seenKeys[repo] = struct{}{}
-+			}
-+		}
-+	}
-+	return repos, nil
-+}
-+
-+func IsCommit(a string) bool {
-+	if _, _, err := run("git", "rev-parse", a); err != nil {
-+		return false
-+	}
-+	return true
-+}
-+
-+var ErrNotCommit = fmt.Errorf("one or both of the provided commits was not a valid commit")
-+
-+func CommitsBetween(a, b string) ([]Commit, error) {
-+	commits := []Commit{}
-+	stdout, stderr, err := run("git", "log", "--oneline", fmt.Sprintf("%s..%s", a, b))
-+	if err != nil {
-+		if !IsCommit(a) || !IsCommit(b) {
-+			return nil, ErrNotCommit
-+		}
-+		return nil, fmt.Errorf("error executing git log: %s: %s", stderr, err)
-+	}
-+	for _, log := range strings.Split(stdout, "\n") {
-+		if len(log) == 0 {
-+			continue
-+		}
-+		commit, err := NewCommitFromOnelineLog(log)
-+		if err != nil {
-+			return nil, err
-+		}
-+		commits = append(commits, commit)
-+	}
-+	return commits, nil
-+}
-+
-+func NewCommitFromOnelineLog(log string) (Commit, error) {
-+	var commit Commit
-+	var err error
-+	parts := strings.Split(log, " ")
-+	if len(parts) < 2 {
-+		return commit, fmt.Errorf("invalid log entry: %s", log)
-+	}
-+	commit.Sha = parts[0]
-+	commit.Summary = strings.Join(parts[1:], " ")
-+	commit.Description, err = descriptionInCommit(commit.Sha)
-+	if err != nil {
-+		return commit, err
-+	}
-+	files, err := filesInCommit(commit.Sha)
-+	if err != nil {
-+		return commit, err
-+	}
-+	commit.Files = files
-+	commit.Email, err = emailInCommit(commit.Sha)
-+	if err != nil {
-+		return commit, err
-+	}
-+	return commit, nil
-+}
-+
-+func FetchRepo(repoDir string) error {
-+	cwd, err := os.Getwd()
-+	if err != nil {
-+		return err
-+	}
-+	defer os.Chdir(cwd)
-+
-+	if err := os.Chdir(repoDir); err != nil {
-+		return err
-+	}
-+
-+	if stdout, stderr, err := run("git", "fetch", "origin"); err != nil {
-+		return fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	}
-+	return nil
-+}
-+
-+func IsAncestor(commit1, commit2, repoDir string) (bool, error) {
-+	cwd, err := os.Getwd()
-+	if err != nil {
-+		return false, err
-+	}
-+	defer os.Chdir(cwd)
-+
-+	if err := os.Chdir(repoDir); err != nil {
-+		return false, err
-+	}
-+
-+	if stdout, stderr, err := run("git", "merge-base", "--is-ancestor", commit1, commit2); err != nil {
-+		return false, fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	}
-+
-+	return true, nil
-+}
-+
-+func CommitDate(commit, repoDir string) (string, error) {
-+	cwd, err := os.Getwd()
-+	if err != nil {
-+		return "", err
-+	}
-+	defer os.Chdir(cwd)
-+
-+	if err := os.Chdir(repoDir); err != nil {
-+		return "", err
-+	}
-+
-+	if stdout, stderr, err := run("git", "fetch", "origin"); err != nil {
-+		return "", fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	}
-+
-+	if stdout, stderr, err := run("git", "show", "-s", "--format=%ci", commit); err != nil {
-+		return "", fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	} else {
-+		return strings.TrimSpace(stdout), nil
-+	}
-+}
-+
-+func Checkout(commit, repoDir string) error {
-+	cwd, err := os.Getwd()
-+	if err != nil {
-+		return err
-+	}
-+	defer os.Chdir(cwd)
-+
-+	if err := os.Chdir(repoDir); err != nil {
-+		return err
-+	}
-+
-+	if stdout, stderr, err := run("git", "checkout", commit); err != nil {
-+		return fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	}
-+	return nil
-+}
-+
-+func CurrentRev(repoDir string) (string, error) {
-+	cwd, err := os.Getwd()
-+	if err != nil {
-+		return "", err
-+	}
-+	defer os.Chdir(cwd)
-+
-+	if err := os.Chdir(repoDir); err != nil {
-+		return "", err
-+	}
-+
-+	if stdout, stderr, err := run("git", "rev-parse", "HEAD"); err != nil {
-+		return "", fmt.Errorf("out=%s, err=%s, %s", strings.TrimSpace(stdout), strings.TrimSpace(stderr), err)
-+	} else {
-+		return strings.TrimSpace(stdout), nil
-+	}
-+}
-+
-+func emailInCommit(sha string) (string, error) {
-+	stdout, stderr, err := run("git", "show", `--format=%ae`, "-s", sha)
-+	if err != nil {
-+		return "", fmt.Errorf("%s: %s", stderr, err)
-+	}
-+	return strings.TrimSpace(stdout), nil
-+}
-+
-+func filesInCommit(sha string) ([]File, error) {
-+	files := []File{}
-+	stdout, stderr, err := run("git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
-+	if err != nil {
-+		return nil, fmt.Errorf("%s: %s", stderr, err)
-+	}
-+	for _, filename := range strings.Split(stdout, "\n") {
-+		if len(filename) == 0 {
-+			continue
-+		}
-+		files = append(files, File(filename))
-+	}
-+	return files, nil
-+}
-+
-+func descriptionInCommit(sha string) ([]string, error) {
-+	descriptionLines := []string{}
-+	stdout, stderr, err := run("git", "log", "--pretty=%b", "-1", sha)
-+	if err != nil {
-+		return descriptionLines, fmt.Errorf("%s: %s", stderr, err)
-+	}
-+
-+	for _, commitLine := range strings.Split(stdout, "\n") {
-+		if len(commitLine) == 0 {
-+			continue
-+		}
-+		descriptionLines = append(descriptionLines, commitLine)
-+	}
-+	return descriptionLines, nil
-+}
-+
-+func run(args ...string) (string, string, error) {
-+	cmd := exec.Command(args[0], args[1:]...)
-+	var stdout bytes.Buffer
-+	var stderr bytes.Buffer
-+	cmd.Stdout = &stdout
-+	cmd.Stderr = &stderr
-+	err := cmd.Run()
-+	return stdout.String(), stderr.String(), err
-+}
-diff --git a/openshift-hack/commitchecker/git_test.go b/openshift-hack/commitchecker/git_test.go
-new file mode 100644
-index 00000000000..f749ce87050
---- /dev/null
-+++ b/openshift-hack/commitchecker/git_test.go
-@@ -0,0 +1,55 @@
-+package main
-+
-+import (
-+	"testing"
-+)
-+
-+func TestUpstreamSummaryPattern(t *testing.T) {
-+	tt := []struct {
-+		summary string
-+		valid   bool
-+	}{
-+		{valid: true, summary: "UPSTREAM: 12345: a change"},
-+		{valid: true, summary: "UPSTREAM: k8s.io/heapster: 12345: a change"},
-+		{valid: true, summary: "UPSTREAM: <carry>: a change"},
-+		{valid: true, summary: "UPSTREAM: <drop>: a change"},
-+		{valid: true, summary: "UPSTREAM: coreos/etcd: <carry>: a change"},
-+		{valid: true, summary: "UPSTREAM: coreos/etcd: <drop>: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: 12345: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: k8s.io/heapster: 12345: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: <carry>: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: <drop>: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: coreos/etcd: <carry>: a change"},
-+		{valid: true, summary: "UPSTREAM: revert: coreos/etcd: <drop>: a change"},
-+		{valid: false, summary: "UPSTREAM: whoopsie daisy"},
-+		{valid: true, summary: "UPSTREAM: gopkg.in/ldap.v2: 51: exposed better API for paged search"},
-+	}
-+	for _, tc := range tt {
-+		t.Run(tc.summary, func(t *testing.T) {
-+			got := UpstreamSummaryPattern.Match([]byte(tc.summary))
-+
-+			if tc.valid != got {
-+				t.Errorf("expected %#v, got %#v", tc.valid, got)
-+			}
-+		})
-+	}
-+}
-+
-+func TestBumpPattern(t *testing.T) {
-+	tt := []struct {
-+		summary string
-+		valid   bool
-+	}{
-+		{valid: true, summary: "bump(*)"},
-+		{valid: false, summary: "not a bump"},
-+	}
-+	for _, tc := range tt {
-+		t.Run(tc.summary, func(t *testing.T) {
-+			got := BumpSummaryPattern.Match([]byte(tc.summary))
-+
-+			if tc.valid != got {
-+				t.Errorf("expected %#v, got %#v", tc.valid, got)
-+			}
-+		})
-+	}
-+}
-diff --git a/openshift-hack/commitchecker/validate.go b/openshift-hack/commitchecker/validate.go
-new file mode 100644
-index 00000000000..d85e95f8ea2
---- /dev/null
-+++ b/openshift-hack/commitchecker/validate.go
-@@ -0,0 +1,82 @@
-+package main
-+
-+import (
-+	"bytes"
-+	"fmt"
-+	"regexp"
-+	"strings"
-+	"text/template"
-+)
-+
-+var (
-+	// AllCommitValidators holds all registered checks.
-+	AllCommitValidators = []func(Commit) []string{
-+		ValidateCommitAuthor,
-+
-+		// Local commit messages must be prefixed with UPSTREAM as per
-+		// README.openshift.md to aid in rebasing on upstream kube.
-+		ValidateCommitMessage,
-+	}
-+)
-+
-+func ValidateCommitAuthor(commit Commit) []string {
-+	var allErrors []string
-+
-+	if strings.HasPrefix(commit.Email, "root@") {
-+		allErrors = append(allErrors, fmt.Sprintf("Commit %s has invalid email %q", commit.Sha, commit.Email))
-+	}
-+
-+	return allErrors
-+}
-+
-+func ValidateCommitMessage(commit Commit) []string {
-+	if commit.MatchesMergeSummaryPattern() {
-+		// Ignore merges
-+		return nil
-+	}
-+
-+	var allErrors []string
-+
-+	if !commit.MatchesUpstreamSummaryPattern() {
-+		tmpl, _ := template.New("problems").Parse(`
-+UPSTREAM commit {{ .Commit.Sha }} has invalid summary {{ .Commit.Summary }}.
-+
-+UPSTREAM commits are validated against the following regular expression:
-+  {{ .Pattern }}
-+
-+UPSTREAM commit summaries should look like:
-+
-+  UPSTREAM: <PR number|carry|drop>: description
-+
-+UPSTREAM commits which revert previous UPSTREAM commits should look like:
-+
-+  UPSTREAM: revert: <normal upstream format>
-+
-+Examples of valid summaries:
-+
-+  UPSTREAM: 12345: A kube fix
-+  UPSTREAM: <carry>: A carried kube change
-+  UPSTREAM: <drop>: A dropped kube change
-+  UPSTREAM: revert: 12345: A kube revert
-+`)
-+		data := struct {
-+			Pattern *regexp.Regexp
-+			Commit  Commit
-+		}{
-+			Pattern: UpstreamSummaryPattern,
-+			Commit:  commit,
-+		}
-+		buffer := &bytes.Buffer{}
-+		err := tmpl.Execute(buffer, data)
-+		if err != nil {
-+			allErrors = append(allErrors, err.Error())
-+			return allErrors
-+		}
-+
-+		allErrors = append(allErrors, buffer.String())
-+
-+		return allErrors
-+	}
-+
-+	return allErrors
-+}
-diff --git a/openshift-hack/commitchecker/validate_test.go b/openshift-hack/commitchecker/validate_test.go
-new file mode 100644
-index 00000000000..6607d4b3cfb
---- /dev/null
-+++ b/openshift-hack/commitchecker/validate_test.go
-@@ -0,0 +1,94 @@
-+package main
-+
-+import (
-+	"reflect"
-+	"testing"
-+)
-+
-+func TestValidateCommitAuthor(t *testing.T) {
-+	tt := []struct {
-+		name         string
-+		commit       Commit
-+		expectedErrs []string
-+	}{
-+		{
-+			name: "fails on root@locahost",
-+			commit: Commit{
-+				Sha:     "aaa0000",
-+				Summary: "a summary",
-+				Files: []File{
-+					"README.md",
-+				},
-+				Email: "root@localhost",
-+			},
-+			expectedErrs: []string{
-+				"Commit aaa0000 has invalid email \"root@localhost\"",
-+			},
-+		},
-+		{
-+			name: "succeeds for deads2k@redhat.com",
-+			commit: Commit{
-+				Sha:     "aaa0000",
-+				Summary: "a summary",
-+				Files: []File{
-+					"README.md",
-+				},
-+				Email: "deads2k@redhat.com",
-+			},
-+			expectedErrs: nil,
-+		},
-+	}
-+
-+	for _, tc := range tt {
-+		t.Run(tc.name, func(t *testing.T) {
-+			gotErrs := ValidateCommitAuthor(tc.commit)
-+			if !reflect.DeepEqual(tc.expectedErrs, gotErrs) {
-+				t.Errorf("expected %#v, got %#v", tc.expectedErrs, gotErrs)
-+			}
-+		})
-+	}
-+}
-+
-+func TestValidateCommitMessage(t *testing.T) {
-+	tt := []struct {
-+		name         string
-+		commit       Commit
-+		expectedErrs []string
-+	}{
-+		{
-+			name: "modifying k8s without UPSTREAM commit fails",
-+			commit: Commit{
-+				Sha:     "aaa0000",
-+				Summary: "wrong summary",
-+				Files: []File{
-+					"README.md",
-+					"pkg/controller/deployment/deployment.go",
-+				},
-+			},
-+			expectedErrs: []string{
-+				"\nUPSTREAM commit aaa0000 has invalid summary wrong summary.\n\nUPSTREAM commits are validated against the following regular expression:\n  ^UPSTREAM: (revert: )?(([\\w\\.-]+\\/[\\w-\\.-]+)?: )?(\\d+:|<carry>:|<drop>:)\n\nUPSTREAM commit summaries should look like:\n\n  UPSTREAM: <PR number|carry|drop>: description\n\nUPSTREAM commits which revert previous UPSTREAM commits should look like:\n\n  UPSTREAM: revert: <normal upstream format>\n\nExamples of valid summaries:\n\n  UPSTREAM: 12345: A kube fix\n  UPSTREAM: <carry>: A carried kube change\n  UPSTREAM: <drop>: A dropped kube change\n  UPSTREAM: revert: 12345: A kube revert\n",
-+			},
-+		},
-+		{
-+			name: "modifying k8s with UPSTREAM commit succeeds",
-+			commit: Commit{
-+				Sha:     "aaa0000",
-+				Summary: "UPSTREAM: 42: Fix kube",
-+				Files: []File{
-+					"README.md",
-+					"pkg/controller/deployment/deployment.go",
-+				},
-+			},
-+			expectedErrs: nil,
-+		},
-+	}
-+
-+	for _, tc := range tt {
-+		t.Run(tc.name, func(t *testing.T) {
-+			gotErrs := ValidateCommitMessage(tc.commit)
-+			if !reflect.DeepEqual(tc.expectedErrs, gotErrs) {
-+				t.Errorf("expected %#v, got %#v", tc.expectedErrs, gotErrs)
-+			}
-+		})
-+	}
 +}
 diff --git a/openshift-hack/conformance-k8s.sh b/openshift-hack/conformance-k8s.sh
 new file mode 100755
@@ -8705,14 +8021,17 @@ index 00000000000..244fdc67e54
 +GO111MODULE=on go generate -mod vendor ./openshift-hack/e2e
 diff --git a/openshift-hack/verify-commits.sh b/openshift-hack/verify-commits.sh
 new file mode 100755
-index 00000000000..847284221b4
+index 00000000000..05c63cc459d
 --- /dev/null
 +++ b/openshift-hack/verify-commits.sh
-@@ -0,0 +1,22 @@
+@@ -0,0 +1,30 @@
 +#!/usr/bin/env bash
 +
++KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
++source "${KUBE_ROOT}/hack/lib/init.sh"
++
 +# shellcheck source=openshift-hack/lib/init.sh
-+source "$(dirname "${BASH_SOURCE[0]}")/lib/init.sh"
++source "${KUBE_ROOT}/openshift-hack/lib/init.sh"
 +
 +function cleanup() {
 +    return_code=$?
@@ -8726,7 +8045,12 @@ index 00000000000..847284221b4
 +  os::log::fatal "Not a Git repository"
 +fi
 +
-+os::util::ensure::built_binary_exists 'commitchecker'
++kube::golang::setup_env
++
++export GOBIN="${OS_OUTPUT_BINPATH}"
++PATH="${GOBIN}:${PATH}"
++
++GO111MODULE=on go install -mod=readonly github.com/openshift/build-machinery-go/commitchecker@latest
 +
 +os::test::junit::declare_suite_start "verify/upstream-commits"
 +os::cmd::expect_success "commitchecker --start ${PULL_BASE_SHA:-master}"
