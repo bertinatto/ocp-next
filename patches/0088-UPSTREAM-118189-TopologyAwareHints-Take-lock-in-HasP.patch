@@ -1,0 +1,82 @@
+From cb8f9c1f6491a74e71db4a5f79d27c576b9c69e1 Mon Sep 17 00:00:00 2001
+From: Miciah Masters <miciah.masters@gmail.com>
+Date: Mon, 22 May 2023 17:24:25 -0400
+Subject: [PATCH] UPSTREAM: 118189: TopologyAwareHints: Take lock in
+ HasPopulatedHints
+
+Prevent potential concurrent map access by taking a lock before reading the
+topology cache's hintsPopulatedByService map.
+
+* staging/src/k8s.io/endpointslice/topologycache/topologycache.go
+(setHintsLocked, hasPopulatedHintsLocked): New helper functions.  These are
+the same as the existing SetHints and HasPopulatedHints methods except that
+these helpers assume that a lock is already held.
+(SetHints): Use setHintsLocked.
+(HasPopulatedHints): Take a lock and use hasPopulatedHintsLocked.
+(AddHints): Take a lock and use setHintsLocked and hasPopulatedHintsLocked.
+* staging/src/k8s.io/endpointslice/topologycache/topologycache_test.go
+(TestTopologyCacheRace): Add a goroutine that calls HasPopulatedHints.
+---
+ .../topologycache/topologycache.go              | 17 +++++++++++++++--
+ .../topologycache/topologycache_test.go         |  3 +++
+ 2 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/pkg/controller/endpointslice/topologycache/topologycache.go b/pkg/controller/endpointslice/topologycache/topologycache.go
+index a8ba640942c..dadd3604581 100644
+--- a/pkg/controller/endpointslice/topologycache/topologycache.go
++++ b/pkg/controller/endpointslice/topologycache/topologycache.go
+@@ -154,8 +154,10 @@ func (t *TopologyCache) AddHints(si *SliceInfo) ([]*discovery.EndpointSlice, []*
+ 		return slicesToCreate, slicesToUpdate, events
+ 	}
+ 
+-	hintsEnabled := t.hintsPopulatedByService.Has(si.ServiceKey)
+-	t.SetHints(si.ServiceKey, si.AddressType, allocatedHintsByZone)
++	t.lock.Lock()
++	defer t.lock.Unlock()
++	hintsEnabled := t.hasPopulatedHintsLocked(si.ServiceKey)
++	t.setHintsLocked(si.ServiceKey, si.AddressType, allocatedHintsByZone)
+ 
+ 	// if hints were not enabled before, we publish an event to indicate we enabled them.
+ 	if !hintsEnabled {
+@@ -175,6 +177,10 @@ func (t *TopologyCache) SetHints(serviceKey string, addrType discovery.AddressTy
+ 	t.lock.Lock()
+ 	defer t.lock.Unlock()
+ 
++	t.setHintsLocked(serviceKey, addrType, allocatedHintsByZone)
++}
++
++func (t *TopologyCache) setHintsLocked(serviceKey string, addrType discovery.AddressType, allocatedHintsByZone EndpointZoneInfo) {
+ 	_, ok := t.endpointsByService[serviceKey]
+ 	if !ok {
+ 		t.endpointsByService[serviceKey] = map[discovery.AddressType]EndpointZoneInfo{}
+@@ -263,6 +269,13 @@ func (t *TopologyCache) SetNodes(nodes []*v1.Node) {
+ 
+ // HasPopulatedHints checks whether there are populated hints for a given service in the cache.
+ func (t *TopologyCache) HasPopulatedHints(serviceKey string) bool {
++	t.lock.Lock()
++	defer t.lock.Unlock()
++
++	return t.hasPopulatedHintsLocked(serviceKey)
++}
++
++func (t *TopologyCache) hasPopulatedHintsLocked(serviceKey string) bool {
+ 	return t.hintsPopulatedByService.Has(serviceKey)
+ }
+ 
+diff --git a/pkg/controller/endpointslice/topologycache/topologycache_test.go b/pkg/controller/endpointslice/topologycache/topologycache_test.go
+index f4dbcce634f..664504b11a9 100644
+--- a/pkg/controller/endpointslice/topologycache/topologycache_test.go
++++ b/pkg/controller/endpointslice/topologycache/topologycache_test.go
+@@ -686,6 +686,9 @@ func TestTopologyCacheRace(t *testing.T) {
+ 	go func() {
+ 		cache.AddHints(sliceInfo)
+ 	}()
++	go func() {
++		cache.HasPopulatedHints(sliceInfo.ServiceKey)
++	}()
+ }
+ 
+ // Test Helpers
+-- 
+2.41.0
+
