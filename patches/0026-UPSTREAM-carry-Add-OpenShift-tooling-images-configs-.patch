@@ -1,4 +1,4 @@
-From 73ba8160938e643505a2138b627f714b721acf2c Mon Sep 17 00:00:00 2001
+From b1c2249bca0ef70587d6659cbf0cebab451215c3 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -471,7 +471,7 @@ Remove commitchecker.
  build/pause/Dockerfile.Rhel                   |  13 +
  build/run.sh                                  |   6 +
  cmd/watch-termination/main.go                 | 366 ++++++++++
- hack/lib/golang.sh                            |  31 +-
+ hack/lib/golang.sh                            |  32 +-
  hack/make-rules/test.sh                       |   1 +
  hack/make-rules/update.sh                     |   2 +
  hack/make-rules/verify.sh                     |  35 +
@@ -541,7 +541,7 @@ Remove commitchecker.
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 78 files changed, 7033 insertions(+), 42 deletions(-)
+ 78 files changed, 7034 insertions(+), 42 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -1694,7 +1694,7 @@ index 00000000000..aa3aa880085
 +	}, nil
 +}
 diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
-index 66772f08a81..c0a651c051a 100755
+index 983ff368e25..ac132eec2d7 100755
 --- a/hack/lib/golang.sh
 +++ b/hack/lib/golang.sh
 @@ -80,6 +80,8 @@ kube::golang::server_targets() {
@@ -1754,20 +1754,24 @@ index 66772f08a81..c0a651c051a 100755
    if [[ -z "$(command -v go)" ]]; then
      kube::log::usage_from_stdin <<EOF
  Can't find 'go' in PATH, please fix and retry.
-@@ -562,7 +541,7 @@ kube::golang::setup_env() {
-   if ! command -v ncpu >/dev/null 2>&1; then
-     # shellcheck disable=SC2164
-     pushd "${KUBE_ROOT}/hack/tools" >/dev/null
--    GO111MODULE=on go install ./ncpu
-+    GO111MODULE=on GOFLAGS=-mod=readonly go install ./ncpu
-     # shellcheck disable=SC2164
-     popd >/dev/null
-   fi
+@@ -561,11 +540,11 @@ kube::golang::setup_env() {
+ kube::golang::setup_gomaxprocs() {
+   # GOMAXPROCS by default does not reflect the number of cpu(s) available
+   # when running in a container, please see https://github.com/golang/go/issues/33803
+   if [[ -z "${GOMAXPROCS:-}" ]]; then
+     if ! command -v ncpu >/dev/null 2>&1; then
+       # shellcheck disable=SC2164
+       pushd "${KUBE_ROOT}/hack/tools" >/dev/null
+-      GO111MODULE=on go install ./ncpu || echo "Will not automatically set GOMAXPROCS"
++      GO111MODULE=on go install -mod=readonly ./ncpu || echo "Will not automatically set GOMAXPROCS"
+       # shellcheck disable=SC2164
+       popd >/dev/null
+     fi
 diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
-index e9074678a8f..1fa9951e7c2 100755
+index 4aa72730d83..deee3361840 100755
 --- a/hack/make-rules/test.sh
 +++ b/hack/make-rules/test.sh
-@@ -51,6 +51,7 @@ kube::test::find_dirs() {
+@@ -52,6 +52,7 @@ kube::test::find_dirs() {
            -o -path './third_party/*' \
            -o -path './staging/*' \
            -o -path './vendor/*' \
