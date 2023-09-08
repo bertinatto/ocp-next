@@ -1,4 +1,4 @@
-From b1c2249bca0ef70587d6659cbf0cebab451215c3 Mon Sep 17 00:00:00 2001
+From 04ddebd030d73869d330dff04d270d3030931aa0 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -462,6 +462,8 @@ UPSTREAM: <carry>: allow apiserver-library-go to depend on k8s.io/kubernetes
 UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
 
 Remove commitchecker.
+
+UPSTREAM: <carry>: Force using host go always and use host libriaries
 ---
  .ci-operator.yaml                             |   4 +
  .gitignore                                    |   7 +
@@ -471,7 +473,7 @@ Remove commitchecker.
  build/pause/Dockerfile.Rhel                   |  13 +
  build/run.sh                                  |   6 +
  cmd/watch-termination/main.go                 | 366 ++++++++++
- hack/lib/golang.sh                            |  32 +-
+ hack/lib/golang.sh                            |  35 +-
  hack/make-rules/test.sh                       |   1 +
  hack/make-rules/update.sh                     |   2 +
  hack/make-rules/verify.sh                     |  35 +
@@ -541,7 +543,7 @@ Remove commitchecker.
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 78 files changed, 7034 insertions(+), 42 deletions(-)
+ 78 files changed, 7036 insertions(+), 43 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -1694,7 +1696,7 @@ index 00000000000..aa3aa880085
 +	}, nil
 +}
 diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
-index 983ff368e25..ac132eec2d7 100755
+index 983ff368e25..5af5b40a34e 100755
 --- a/hack/lib/golang.sh
 +++ b/hack/lib/golang.sh
 @@ -80,6 +80,8 @@ kube::golang::server_targets() {
@@ -1727,7 +1729,18 @@ index 983ff368e25..ac132eec2d7 100755
  
  # Fully-qualified package names that we want to instrument for coverage information.
  readonly KUBE_COVERAGE_INSTRUMENTED_PACKAGES=(
-@@ -439,7 +429,7 @@ kube::golang::set_platform_envs() {
+@@ -360,7 +350,9 @@ kube::golang::is_statically_linked_library() {
+   if [[ -n "${KUBE_CGO_OVERRIDES_LIST:+x}" ]]; then
+     for e in "${KUBE_CGO_OVERRIDES_LIST[@]}"; do [[ "${1}" == *"/${e}" ]] && return 1; done;
+   fi
+-  for e in "${KUBE_STATIC_LIBRARIES[@]}"; do [[ "${1}" == *"/${e}" ]] && return 0; done;
++  if [[ -n "${KUBE_STATIC_LIBRARIES:+x}" ]]; then
++    for e in "${KUBE_STATIC_LIBRARIES[@]}"; do [[ "${1}" == *"/${e}" ]] && return 0; done;
++  fi
+   if [[ -n "${KUBE_STATIC_OVERRIDES_LIST:+x}" ]]; then
+     for e in "${KUBE_STATIC_OVERRIDES_LIST[@]}"; do [[ "${1}" == *"/${e}" ]] && return 0; done;
+   fi
+@@ -439,7 +431,7 @@ kube::golang::set_platform_envs() {
  
    # if CC is defined for platform then always enable it
    ccenv=$(echo "$platform" | awk -F/ '{print "KUBE_" toupper($1) "_" toupper($2) "_CC"}')
@@ -1736,7 +1749,7 @@ index 983ff368e25..ac132eec2d7 100755
      export CGO_ENABLED=1
      export CC="${!ccenv}"
    fi
-@@ -464,17 +454,6 @@ kube::golang::create_gopath_tree() {
+@@ -464,17 +456,6 @@ kube::golang::create_gopath_tree() {
  #   env-var GO_VERSION is the desired go version to use, downloading it if needed (defaults to content of .go-version)
  #   env-var FORCE_HOST_GO set to a non-empty value uses the go version in the $PATH and skips ensuring $GO_VERSION is used
  kube::golang::verify_go_version() {
@@ -1754,11 +1767,7 @@ index 983ff368e25..ac132eec2d7 100755
    if [[ -z "$(command -v go)" ]]; then
      kube::log::usage_from_stdin <<EOF
  Can't find 'go' in PATH, please fix and retry.
-@@ -561,11 +540,11 @@ kube::golang::setup_env() {
- kube::golang::setup_gomaxprocs() {
-   # GOMAXPROCS by default does not reflect the number of cpu(s) available
-   # when running in a container, please see https://github.com/golang/go/issues/33803
-   if [[ -z "${GOMAXPROCS:-}" ]]; then
+@@ -565,7 +546,7 @@ kube::golang::setup_gomaxprocs() {
      if ! command -v ncpu >/dev/null 2>&1; then
        # shellcheck disable=SC2164
        pushd "${KUBE_ROOT}/hack/tools" >/dev/null
