@@ -1,4 +1,4 @@
-From 04ddebd030d73869d330dff04d270d3030931aa0 Mon Sep 17 00:00:00 2001
+From 476ca7d9528e9ae016f0fc01629748edd8b431f0 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -464,6 +464,10 @@ UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
 Remove commitchecker.
 
 UPSTREAM: <carry>: Force using host go always and use host libriaries
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+Update builder images.
 ---
  .ci-operator.yaml                             |   4 +
  .gitignore                                    |   7 +
@@ -1289,18 +1293,18 @@ index 00000000000..2edea6fe8e8
 +7. If you have `gh` installed and are logged in, it will attempt to create a PR for you by opening a web browser.
 diff --git a/build/pause/Dockerfile.Rhel b/build/pause/Dockerfile.Rhel
 new file mode 100644
-index 00000000000..64b64a4287f
+index 00000000000..d9fedbca2a2
 --- /dev/null
 +++ b/build/pause/Dockerfile.Rhel
 @@ -0,0 +1,13 @@
-+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.14 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.15 AS builder
 +WORKDIR /go/src/github.com/openshift/kubernetes/build/pause
 +COPY . .
 +RUN dnf install -y gcc glibc-static && \
 +    mkdir -p bin && \
 +    gcc -Os -Wall -Werror -static -o bin/pause ./linux/pause.c
 +
-+FROM registry.ci.openshift.org/ocp/4.14:base
++FROM registry.ci.openshift.org/ocp/4.15:base
 +COPY --from=builder /go/src/github.com/openshift/kubernetes/build/pause/bin/pause /usr/bin/pod
 +LABEL io.k8s.display-name="OpenShift Pod" \
 +      io.k8s.description="This is a component of OpenShift and contains the binary that holds the pod namespaces." \
@@ -4002,11 +4006,11 @@ index 00000000000..7b196b0fb70
 +  - sdodson
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
 new file mode 100644
-index 00000000000..e89b9535910
+index 00000000000..9a593c70e72
 --- /dev/null
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
 @@ -0,0 +1,16 @@
-+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.14 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.15 AS builder
 +WORKDIR /go/src/k8s.io/kubernetes
 +COPY . .
 +RUN make WHAT='cmd/kube-apiserver cmd/kube-controller-manager cmd/kube-scheduler cmd/kubelet cmd/watch-termination openshift-hack/cmd/k8s-tests' && \
@@ -4015,7 +4019,7 @@ index 00000000000..e89b9535910
 +    cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/{kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,watch-termination,k8s-tests} \
 +    /tmp/build
 +
-+FROM registry.ci.openshift.org/ocp/4.14:base
++FROM registry.ci.openshift.org/ocp/4.15:base
 +RUN yum install -y --setopt=tsflags=nodocs --setopt=skip_missing_names_on_install=False iproute && yum clean all
 +COPY --from=builder /tmp/build/* /usr/bin/
 +LABEL io.k8s.display-name="OpenShift Kubernetes Server Commands" \
@@ -4301,11 +4305,11 @@ index 00000000000..fc01366cf54
 +  --branch=origin-ci-dev
 diff --git a/openshift-hack/images/tests/Dockerfile.rhel b/openshift-hack/images/tests/Dockerfile.rhel
 new file mode 100644
-index 00000000000..f2394bde16f
+index 00000000000..081032f52e7
 --- /dev/null
 +++ b/openshift-hack/images/tests/Dockerfile.rhel
 @@ -0,0 +1,21 @@
-+FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.14 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-8-golang-1.20-openshift-4.15 AS builder
 +WORKDIR /go/src/k8s.io/kubernetes
 +COPY . .
 +RUN make WHAT=openshift-hack/e2e/k8s-e2e.test; \
@@ -4316,7 +4320,7 @@ index 00000000000..f2394bde16f
 +    cp /go/src/k8s.io/kubernetes/openshift-hack/test-kubernetes-e2e.sh /tmp/build/
 +
 +
-+FROM registry.svc.ci.openshift.org/ocp/4.13:tools
++FROM registry.ci.openshift.org/ocp/4.15:tools
 +COPY --from=builder /tmp/build/k8s-e2e.test /usr/bin/
 +COPY --from=builder /tmp/build/ginkgo /usr/bin/
 +COPY --from=builder /tmp/build/test-kubernetes-e2e.sh /usr/bin/
