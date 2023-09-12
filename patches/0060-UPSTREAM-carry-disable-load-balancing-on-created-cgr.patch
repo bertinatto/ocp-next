@@ -1,4 +1,4 @@
-From bd779b677bdae59b164fed161a72031ae7af4ffd Mon Sep 17 00:00:00 2001
+From 639ce288f82f1632835415a2e62f42e1a7053884 Mon Sep 17 00:00:00 2001
 From: Peter Hunt~ <pehunt@redhat.com>
 Date: Mon, 20 Mar 2023 11:43:25 -0400
 Subject: [PATCH] UPSTREAM: <carry>: disable load balancing on created cgroups
@@ -26,15 +26,26 @@ There are situations where cpu load balance disabling is desired when the kubele
 Instead of using that condition, set the cpu load balancing parameter for new slices when the cpu policy is static
 
 Signed-off-by: Peter Hunt <pehunt@redhat.com>
+
+UPSTREAM: <carry>: cm: reorder setting of sched_load_balance for sandbox slice
+
+If we call mgr.Apply() first, libcontainer's cpusetCopyIfNeeded()
+will copy the parent cpuset and set load balancing to 1 by default.
+This causes the kernel to set the cpus to not load balanced for a brief moment
+which causes churn.
+
+instead, create the cgroup and set load balance, then have Apply() copy the values into it.
+
+Signed-off-by: Peter Hunt <pehunt@redhat.com>
 ---
- pkg/kubelet/cm/cgroup_manager_linux.go       | 22 ++++++++++++++++++++
- pkg/kubelet/cm/cgroup_manager_unsupported.go |  3 +++
- pkg/kubelet/cm/container_manager_linux.go    |  3 +++
+ pkg/kubelet/cm/cgroup_manager_linux.go       | 29 +++++++++++++++++++-
+ pkg/kubelet/cm/cgroup_manager_unsupported.go |  3 ++
+ pkg/kubelet/cm/container_manager_linux.go    |  3 ++
  pkg/kubelet/cm/types.go                      |  2 ++
- 4 files changed, 30 insertions(+)
+ 4 files changed, 36 insertions(+), 1 deletion(-)
 
 diff --git a/pkg/kubelet/cm/cgroup_manager_linux.go b/pkg/kubelet/cm/cgroup_manager_linux.go
-index f54eaa2979f..04a03f9845a 100644
+index f54eaa2979f..8398f3c7cce 100644
 --- a/pkg/kubelet/cm/cgroup_manager_linux.go
 +++ b/pkg/kubelet/cm/cgroup_manager_linux.go
 @@ -27,6 +27,7 @@ import (
@@ -56,27 +67,41 @@ index f54eaa2979f..04a03f9845a 100644
  }
  
  // Make sure that cgroupManagerImpl implements the CgroupManager interface
-@@ -476,6 +481,19 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
- 		utilruntime.HandleError(fmt.Errorf("cgroup manager.Set failed: %w", err))
+@@ -460,6 +465,25 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
+ 		return err
  	}
  
 +	// Disable cpuset.sched_load_balance for all cgroups Kubelet creates.
 +	// This way, CRI can disable sched_load_balance for pods that must have load balance
 +	// disabled, but the slices can contain all cpus (as the guaranteed cpus are known dynamically).
++	// Note: this should be done before Apply(-1) below, as Apply contains cpusetCopyIfNeeded(), which will
++	// populate the cpuset with the parent's cpuset. However, it will be initialized to sched_load_balance=1
++	// which will cause the kernel to move all cpusets out of their isolated sched_domain, causing unnecessary churn.
 +	if m.cpuLoadBalanceDisable && !libcontainercgroups.IsCgroup2UnifiedMode() {
 +		path := manager.Path("cpuset")
 +		if path == "" {
 +			return fmt.Errorf("Failed to find cpuset for newly created cgroup")
++		}
++		if err := os.Mkdir(path, 0o755); err != nil && !os.IsNotExist(err) {
++			return fmt.Errorf("failed to create cpuset for newly created cgroup: %w", err)
 +		}
 +		if err := cgroups.WriteFile(path, "cpuset.sched_load_balance", "0"); err != nil {
 +			return err
 +		}
 +	}
 +
+ 	// Apply(-1) is a hack to create the cgroup directories for each resource
+ 	// subsystem. The function [cgroups.Manager.apply()] applies cgroup
+ 	// configuration to the process with the specified pid.
+@@ -475,7 +499,6 @@ func (m *cgroupManagerImpl) Create(cgroupConfig *CgroupConfig) error {
+ 	if err := manager.Set(libcontainerCgroupConfig.Resources); err != nil {
+ 		utilruntime.HandleError(fmt.Errorf("cgroup manager.Set failed: %w", err))
+ 	}
+-
  	return nil
  }
  
-@@ -747,3 +765,7 @@ func (m *cgroupManagerImpl) SetCgroupConfig(name CgroupName, resource v1.Resourc
+@@ -747,3 +770,7 @@ func (m *cgroupManagerImpl) SetCgroupConfig(name CgroupName, resource v1.Resourc
  	}
  	return nil
  }
