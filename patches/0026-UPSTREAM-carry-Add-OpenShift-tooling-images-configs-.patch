@@ -1,4 +1,4 @@
-From 476ca7d9528e9ae016f0fc01629748edd8b431f0 Mon Sep 17 00:00:00 2001
+From 20724e68ea495f2f70c113c03d31fbb5e2836513 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -503,7 +503,7 @@ Update builder images.
  openshift-hack/e2e/annotate/annotate_test.go  |  55 ++
  openshift-hack/e2e/annotate/cmd/main.go       |   9 +
  .../generated/zz_generated.annotations.go     |   1 +
- openshift-hack/e2e/annotate/rules.go          | 383 +++++++++++
+ openshift-hack/e2e/annotate/rules.go          | 386 +++++++++++
  openshift-hack/e2e/annotate/rules_test.go     |  88 +++
  openshift-hack/e2e/include.go                 |  23 +
  openshift-hack/e2e/kube_e2e_test.go           | 102 +++
@@ -547,7 +547,7 @@ Update builder images.
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 78 files changed, 7036 insertions(+), 43 deletions(-)
+ 78 files changed, 7039 insertions(+), 43 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -616,14 +616,14 @@ Update builder images.
 
 diff --git a/.ci-operator.yaml b/.ci-operator.yaml
 new file mode 100644
-index 00000000000..844f0d26ad6
+index 00000000000..7cd14bfef5b
 --- /dev/null
 +++ b/.ci-operator.yaml
 @@ -0,0 +1,4 @@
 +build_root_image:
 +  name: release
 +  namespace: openshift
-+  tag: rhel-8-release-golang-1.20-openshift-4.14
++  tag: rhel-8-release-golang-1.20-openshift-4.15
 diff --git a/.gitignore b/.gitignore
 index 844f2504025..2099e93209a 100644
 --- a/.gitignore
@@ -3203,10 +3203,10 @@ index 00000000000..951c880085e
 +package generated
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
 new file mode 100644
-index 00000000000..bc1607135fe
+index 00000000000..3cf44abb3c4
 --- /dev/null
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -0,0 +1,383 @@
+@@ -0,0 +1,386 @@
 +package annotate
 +
 +import (
@@ -3372,6 +3372,9 @@ index 00000000000..bc1607135fe
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-17202
 +			`\[sig-apps\] StatefulSet Scaling StatefulSetStartOrdinal \[Feature:StatefulSetStartOrdinal\] Removing \.start\.ordinal`,
++
++			// Feature removed in Kubernetes 1.28: https://github.com/kubernetes/kubernetes/pull/115843
++			`\[Feature:NetworkPolicyStatus\]`,
 +		},
 +		// tests that may work, but we don't support them
 +		"[Disabled:Unsupported]": {

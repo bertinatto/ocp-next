@@ -109,25 +109,25 @@ apply_patches() {
 update_dependencies() {
     local local_branch="$1"
     GOPROXY=direct hack/pin-dependency.sh github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2 v2.9-openshift-4.15
-    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/api=github.com/bertinatto/api "$local_branch"
-    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/client-go=github.com/bertinatto/client-go "$local_branch"
-    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/library-go=github.com/bertinatto/library-go "$local_branch"
-    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/apiserver-library-go=github.com/bertinatto/apiserver-library-go "$local_branch"
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/api da2f2ca9ae0f78615cf113ad8cfd5d56177b8d70
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/client-go 48b43e1706c23323bdb3d9f41a00711e186d49dc
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/library-go ab5ef2a77a1a1e8f1428e0b1f4ad79e56d07c867
+    GOPROXY=direct hack/pin-dependency.sh github.com/openshift/apiserver-library-go b96ca0d4c1de31b25f863e62eaf2153800281c77
 }
 
 update_vendor() {
     # hack/update-vendor.sh
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 hack/update-vendor.sh'
+    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.15 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 hack/update-vendor.sh'
     git add .
     git commit -m "UPSTREAM: <drop>: hack/update-vendor.sh"
 }
 
 update_generated() {
-    eval "$(hack/install-etcd.sh | grep "export PATH")"
-    eval "$(hack/install-protoc.sh | grep "export PATH")"
+    # eval "$(hack/install-etcd.sh | grep "export PATH")"
+    # eval "$(hack/install-protoc.sh | grep "export PATH")"
     # make clean && make update
     make clean
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'export PATH="/go/k8s.io/kubernetes/third_party/etcd:${PATH}" && export PATH="/go/k8s.io/kubernetes/third_party/protoc:${PATH}" && OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 make update'
+    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.15 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 make update'
     git add .
     git commit -m "UPSTREAM: <drop>: make update"
 }
