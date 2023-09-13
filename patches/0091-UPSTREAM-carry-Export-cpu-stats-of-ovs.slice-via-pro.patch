@@ -1,0 +1,34 @@
+From 1ef3a9e73991d0113e8b80fb7a02317e9f738eba Mon Sep 17 00:00:00 2001
+From: Martin Sivak <mars@montik.net>
+Date: Thu, 31 Aug 2023 17:27:55 +0200
+Subject: [PATCH] UPSTREAM: <carry>: Export cpu stats of ovs.slice via
+ prometheus
+
+When a PerformanceProfile configures a node for cpu partitioning,
+it also lets OVS use all the cpus available to burstable pods.
+To be able to do that, OVS was moved to its own slice and that
+slice needs to be re-added to cAdvisor for monitoring purposes.
+---
+ cmd/kubelet/app/server.go | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/cmd/kubelet/app/server.go b/cmd/kubelet/app/server.go
+index 78b2d2c1394..34570bc815b 100644
+--- a/cmd/kubelet/app/server.go
++++ b/cmd/kubelet/app/server.go
+@@ -709,6 +709,12 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
+ 		cgroupRoots = append(cgroupRoots, s.SystemCgroups)
+ 	}
+ 
++	// CARRY: Monitor extra cgroups that are specific to OpenShift deployments
++	//        Adding them here since there is no way to handle this via configuration atm
++	// - ovs.slice is configured on clusters that use the NTO's PerformanceProfile and only exists together
++	//   with system-cpu-reserved
++	cgroupRoots = append(cgroupRoots, "/ovs.slice")
++
+ 	if kubeDeps.CAdvisorInterface == nil {
+ 		imageFsInfoProvider := cadvisor.NewImageFsInfoProvider(s.ContainerRuntimeEndpoint)
+ 		kubeDeps.CAdvisorInterface, err = cadvisor.New(imageFsInfoProvider, s.RootDirectory, cgroupRoots, cadvisor.UsingLegacyCadvisorStats(s.ContainerRuntimeEndpoint), s.LocalStorageCapacityIsolation)
+-- 
+2.41.0
+
