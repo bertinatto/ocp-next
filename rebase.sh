@@ -117,17 +117,17 @@ update_dependencies() {
 
 update_vendor() {
     # hack/update-vendor.sh
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.15 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 hack/update-vendor.sh'
+    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 hack/update-vendor.sh'
     git add .
     git commit -m "UPSTREAM: <drop>: hack/update-vendor.sh"
 }
 
 update_generated() {
-    # eval "$(hack/install-etcd.sh | grep "export PATH")"
-    # eval "$(hack/install-protoc.sh | grep "export PATH")"
+    eval "$(hack/install-etcd.sh | grep "export PATH")"
+    eval "$(hack/install-protoc.sh | grep "export PATH")"
     # make clean && make update
     make clean
-    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.15 bash -c 'OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 make update'
+    podman run -it --rm -v $( pwd ):/go/k8s.io/kubernetes:Z --workdir=/go/k8s.io/kubernetes registry.ci.openshift.org/openshift/release:rhel-8-release-golang-1.20-openshift-4.14 bash -c 'export PATH="/go/k8s.io/kubernetes/third_party/etcd:${PATH}" && export PATH="/go/k8s.io/kubernetes/third_party/protoc:${PATH}" && OS_RUN_WITHOUT_DOCKER=yes FORCE_HOST_GO=1 make update'
     git add .
     git commit -m "UPSTREAM: <drop>: make update"
 }
