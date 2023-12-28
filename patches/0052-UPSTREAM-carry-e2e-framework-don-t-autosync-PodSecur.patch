@@ -1,4 +1,4 @@
-From 0c088305fbdcfc22afa8383204314548807671ee Mon Sep 17 00:00:00 2001
+From da2d3908d124b410c9d9153eacd30242a7f91756 Mon Sep 17 00:00:00 2001
 From: Stanislav Laznicka <slaznick@redhat.com>
 Date: Thu, 19 May 2022 13:49:49 +0200
 Subject: [PATCH] UPSTREAM: <carry>: e2e-framework: don't autosync PodSecurity
@@ -33,5 +33,5 @@ index e29e0edf58e..99cca71f70e 100644
  	ns, err := createTestingNS(ctx, baseName, f.ClientSet, labels)
  	// check ns instead of err to see if it's nil as we may
 -- 
-2.41.0
+2.43.0
 

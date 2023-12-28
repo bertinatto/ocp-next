@@ -1,4 +1,4 @@
-From 602f33bcdd8087c8c3d242f50ab93ae20731b8fa Mon Sep 17 00:00:00 2001
+From 16fc8eaa677d4fc5ce5b2adeffd2fe50bb9f587c Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: patch aggregator to allow delegating
@@ -43,12 +43,12 @@ index 5ee06f6a745..f8825e069d6 100644
  	crds, err := c.crdLister.List(labels.Everything())
  	if err != nil {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index af37ba70f0e..015587aeb51 100644
+index 77fa59d19d5..ad782076a26 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-@@ -151,6 +151,9 @@ type APIAggregator struct {
- 	// handledGroups are the groups that already have routes
- 	handledGroups sets.String
+@@ -152,6 +152,9 @@ type APIAggregator struct {
+ 	// is the versions for the group.
+ 	handledGroupVersions map[string]sets.Set[string]
  
 +	// handledAlwaysLocalDelegatePaths are the URL paths that already have routes registered
 +	handledAlwaysLocalDelegatePaths sets.String
@@ -56,7 +56,7 @@ index af37ba70f0e..015587aeb51 100644
  	// lister is used to add group handling for /apis/<group> aggregator lookups based on
  	// controller state
  	lister listers.APIServiceLister
-@@ -235,18 +238,19 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+@@ -236,18 +239,19 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
  	}
  
  	s := &APIAggregator{
@@ -64,7 +64,7 @@ index af37ba70f0e..015587aeb51 100644
 -		delegateHandler:            delegationTarget.UnprotectedHandler(),
 -		proxyTransportDial:         proxyTransportDial,
 -		proxyHandlers:              map[string]*proxyHandler{},
--		handledGroups:              sets.String{},
+-		handledGroupVersions:       map[string]sets.Set[string]{},
 -		lister:                     informerFactory.Apiregistration().V1().APIServices().Lister(),
 -		APIRegistrationInformers:   informerFactory,
 -		serviceResolver:            c.ExtraConfig.ServiceResolver,
@@ -76,7 +76,7 @@ index af37ba70f0e..015587aeb51 100644
 +		delegateHandler:                 delegationTarget.UnprotectedHandler(),
 +		proxyTransportDial:              proxyTransportDial,
 +		proxyHandlers:                   map[string]*proxyHandler{},
-+		handledGroups:                   sets.String{},
++		handledGroupVersions:            map[string]sets.Set[string]{},
 +		handledAlwaysLocalDelegatePaths: sets.String{},
 +		lister:                          informerFactory.Apiregistration().V1().APIServices().Lister(),
 +		APIRegistrationInformers:        informerFactory,
@@ -88,7 +88,7 @@ index af37ba70f0e..015587aeb51 100644
  	}
  
  	// used later  to filter the served resource by those that have expired.
-@@ -566,6 +570,18 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
+@@ -569,6 +573,18 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
  		return nil
  	}
  
@@ -190,5 +190,5 @@ index 00000000000..f7169c0d1ab
 +	return false
 +}
 -- 
-2.41.0
+2.43.0
 

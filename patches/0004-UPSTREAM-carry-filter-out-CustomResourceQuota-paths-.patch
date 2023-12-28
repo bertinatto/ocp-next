@@ -1,4 +1,4 @@
-From 0cd04660b3a94cc5666d96ff0c62c050190cf849 Mon Sep 17 00:00:00 2001
+From aca5da838fce4057e9eaecda10030e5ba4ff1418 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: filter out CustomResourceQuota paths from
@@ -16,7 +16,7 @@ OpenShift-Rebase-Source: 26005f1649d
  1 file changed, 27 insertions(+)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/routes/openapi.go b/staging/src/k8s.io/apiserver/pkg/server/routes/openapi.go
-index 2819d157601..8c8089d7f31 100644
+index 12c8b1ad910..13982b7b4ce 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/routes/openapi.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/routes/openapi.go
 @@ -17,6 +17,8 @@ limitations under the License.
@@ -28,7 +28,7 @@ index 2819d157601..8c8089d7f31 100644
  	restful "github.com/emicklei/go-restful/v3"
  	"k8s.io/klog/v2"
  
-@@ -37,10 +39,35 @@ type OpenAPI struct {
+@@ -38,10 +40,35 @@ type OpenAPI struct {
  
  // Install adds the SwaggerUI webservice to the given mux.
  func (oa OpenAPI) InstallV2(c *restful.Container, mux *mux.PathRecorderMux) (*handler.OpenAPIService, *spec.Swagger) {
@@ -65,5 +65,5 @@ index 2819d157601..8c8089d7f31 100644
  	openAPIVersionedService := handler.NewOpenAPIService(spec)
  	openAPIVersionedService.RegisterOpenAPIVersionedService("/openapi/v2", mux)
 -- 
-2.40.1
+2.43.0
 

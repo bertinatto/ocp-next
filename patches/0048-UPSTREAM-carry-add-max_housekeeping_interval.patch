@@ -1,4 +1,4 @@
-From 92fab189b0f8cd8f3d3839d7c0d12a35d2eb2cfd Mon Sep 17 00:00:00 2001
+From 92753257bd7ba762fa7c15d65f02b3268c51cf95 Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Wed, 7 Jul 2021 11:25:01 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add max_housekeeping_interval
@@ -23,7 +23,7 @@ index e75e65ec37c..c2ba0d1bce3 100644
  	// These flags were implicit from cadvisor, and are mistakes that should be registered deprecated:
  	const deprecated = "This is a cadvisor flag that was mistakenly registered with the Kubelet. Due to legacy concerns, it will follow the standard CLI deprecation timeline before being removed."
 diff --git a/pkg/kubelet/cadvisor/cadvisor_linux.go b/pkg/kubelet/cadvisor/cadvisor_linux.go
-index 2c93cfa936f..d6ac20c7944 100644
+index f4857f7cb08..0c823b584c5 100644
 --- a/pkg/kubelet/cadvisor/cadvisor_linux.go
 +++ b/pkg/kubelet/cadvisor/cadvisor_linux.go
 @@ -59,10 +59,17 @@ const defaultHousekeepingInterval = 10 * time.Second
@@ -45,10 +45,10 @@ index 2c93cfa936f..d6ac20c7944 100644
  		"event_storage_event_limit": "default=0",
  		"event_storage_age_limit":   "default=0",
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index 2df6beac048..67a4670b2f5 100644
+index 141b666c714..2209a787dba 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -156,10 +156,6 @@ const (
+@@ -158,10 +158,6 @@ const (
  	// the cache.
  	runtimeCacheRefreshPeriod = housekeepingPeriod + housekeepingWarningDuration
  
@@ -59,8 +59,8 @@ index 2df6beac048..67a4670b2f5 100644
  	// The path in containers' filesystems where the hosts file is mounted.
  	linuxEtcHostsPath   = "/etc/hosts"
  	windowsEtcHostsPath = "C:\\Windows\\System32\\drivers\\etc\\hosts"
-@@ -208,8 +204,20 @@ var (
- 	// ContainerLogsDir can be overwrited for testing usage
+@@ -210,8 +206,20 @@ var (
+ 	// ContainerLogsDir can be overwritten for testing usage
  	ContainerLogsDir = DefaultContainerLogsDir
  	etcHostsPath     = getContainerEtcHostsPath()
 +	// Period for performing eviction monitoring.
@@ -81,5 +81,5 @@ index 2df6beac048..67a4670b2f5 100644
  	if sysruntime.GOOS == "windows" {
  		return windowsEtcHostsPath
 -- 
-2.40.1
+2.43.0
 

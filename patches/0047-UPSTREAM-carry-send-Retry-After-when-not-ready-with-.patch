@@ -1,4 +1,4 @@
-From 6100a0ab683dadd843b0d2fa541ea42fbc1260d6 Mon Sep 17 00:00:00 2001
+From 981a589c505acc7b9eff03a1c89afa7bf77d0bec Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Wed, 25 Aug 2021 16:13:46 -0400
 Subject: [PATCH] UPSTREAM: <carry>: send Retry-After when not ready with a
@@ -15,10 +15,10 @@ OpenShift-Rebase-Source: cd08005d72d
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/patch_optin_retry.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index d83828d42c5..f8261d72b10 100644
+index 80ee610e183..2ecb2f1eac6 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -1025,6 +1025,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1112,6 +1112,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	if c.ShutdownSendRetryAfter {
  		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
  	}
@@ -92,5 +92,5 @@ index 13fca93d6ca..0324b3f5b4b 100644
 +	}
 +}
 -- 
-2.40.1
+2.43.0
 

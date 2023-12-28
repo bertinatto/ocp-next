@@ -1,4 +1,4 @@
-From 05541f07e7cfbdad6af86ee751c38aef8a39fb6e Mon Sep 17 00:00:00 2001
+From e7c1141b5fa91f9558a2fea626dab289c86fceec Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Tue, 24 Aug 2021 15:13:04 +0200
 Subject: [PATCH] UPSTREAM: <carry>: skip posting failures to aggregated APIs
@@ -27,10 +27,10 @@ OpenShift-Rebase-Source: 8558e889333
  4 files changed, 35 insertions(+), 1 deletion(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index d83828d42c5..acf031c1901 100644
+index df23e48cd63..80ee610e183 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -618,6 +618,11 @@ func (c *Config) DrainedNotify() <-chan struct{} {
+@@ -680,6 +680,11 @@ func (c *Config) DrainedNotify() <-chan struct{} {
  	return c.lifecycleSignals.InFlightRequestsDrained.Signaled()
  }
  
@@ -43,10 +43,10 @@ index d83828d42c5..acf031c1901 100644
  // from other fields. If you're going to `ApplyOptions`, do that first. It's mutating the receiver.
  func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedConfig {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index 22ba4a3410f..8f9d46a0d4e 100644
+index ad782076a26..38b1db14416 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-@@ -314,6 +314,7 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+@@ -326,6 +326,7 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
  		proxyTransportDial,
  		(func() ([]byte, []byte))(s.proxyCurrentCertKeyContent),
  		s.serviceResolver,
@@ -156,5 +156,5 @@ index dc9fbdd3541..a4ff8b1f062 100644
  			c.sync(tc.apiServiceName)
  
 -- 
-2.41.0
+2.43.0
 

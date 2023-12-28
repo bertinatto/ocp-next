@@ -1,4 +1,4 @@
-From e64e476ab259f104692f8dbd61b51921726a53b5 Mon Sep 17 00:00:00 2001
+From ebac004dfc030e8d5acc513deb735b3c4291dc63 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Mon, 17 Oct 2022 17:33:34 -0400
 Subject: [PATCH] UPSTREAM: <carry>: make the PSA workload admission warnings
@@ -73,10 +73,10 @@ index ede552e7445..45baad88b8f 100644
  
  	// HANDLER CHAIN (with oauth server and web console)
 diff --git a/plugin/pkg/admission/security/podsecurity/admission.go b/plugin/pkg/admission/security/podsecurity/admission.go
-index 2e99f11b6bb..fa90bb9fbf7 100644
+index e4b55cb4908..d30dae9a7eb 100644
 --- a/plugin/pkg/admission/security/podsecurity/admission.go
 +++ b/plugin/pkg/admission/security/podsecurity/admission.go
-@@ -114,7 +114,7 @@ func newPlugin(reader io.Reader) (*Plugin, error) {
+@@ -115,7 +115,7 @@ func newPlugin(reader io.Reader) (*Plugin, error) {
  			Configuration:    config,
  			Evaluator:        evaluator,
  			Metrics:          getDefaultRecorder(),
@@ -203,5 +203,5 @@ index 00000000000..fb8b8488a6e
 +	return podTemplateMeta, &pod.Spec, nil
 +}
 -- 
-2.40.1
+2.43.0
 

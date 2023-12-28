@@ -1,4 +1,4 @@
-From c11c8619ea501aa40b4b9138384d84363d805ce1 Mon Sep 17 00:00:00 2001
+From 64c0d6dd77c2d7e17d7e30841101fe29c4f85c5f Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Wed, 17 Aug 2022 09:17:22 -0400
 Subject: [PATCH] UPSTREAM: <carry>: optionally enable retry after until
@@ -15,10 +15,10 @@ OpenShift-Rebase-Source: fc3523f8e3a
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/with_not_ready_patch_test.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index f8261d72b10..0207916b007 100644
+index 2ecb2f1eac6..e72bb12a00a 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -303,6 +303,18 @@ type Config struct {
+@@ -311,6 +311,18 @@ type Config struct {
  	// This grace period is orthogonal to other grace periods, and
  	// it is not overridden by any other grace period.
  	ShutdownWatchTerminationGracePeriod time.Duration
@@ -37,7 +37,7 @@ index f8261d72b10..0207916b007 100644
  }
  
  // EventSink allows to create events.
-@@ -986,6 +998,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1073,6 +1085,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  		handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
  	}
  
@@ -296,10 +296,10 @@ index 00000000000..f5d1b5c6111
 +	}
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go b/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
-index f9d574d5d2c..9297363fe6e 100644
+index 1373d8a4d73..05d663e1171 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
-@@ -90,6 +90,18 @@ type ServerRunOptions struct {
+@@ -89,6 +89,18 @@ type ServerRunOptions struct {
  	// This grace period is orthogonal to other grace periods, and
  	// it is not overridden by any other grace period.
  	ShutdownWatchTerminationGracePeriod time.Duration
@@ -318,15 +318,15 @@ index f9d574d5d2c..9297363fe6e 100644
  }
  
  func NewServerRunOptions() *ServerRunOptions {
-@@ -106,6 +118,7 @@ func NewServerRunOptions() *ServerRunOptions {
+@@ -104,6 +116,7 @@ func NewServerRunOptions() *ServerRunOptions {
+ 		JSONPatchMaxCopyBytes:               defaults.JSONPatchMaxCopyBytes,
  		MaxRequestBodyBytes:                 defaults.MaxRequestBodyBytes,
- 		EnablePriorityAndFairness:           true,
  		ShutdownSendRetryAfter:              false,
 +		SendRetryAfterWhileNotReadyOnce:     false,
  	}
  }
  
-@@ -126,6 +139,7 @@ func (s *ServerRunOptions) ApplyTo(c *server.Config) error {
+@@ -124,6 +137,7 @@ func (s *ServerRunOptions) ApplyTo(c *server.Config) error {
  	c.PublicAddress = s.AdvertiseAddress
  	c.ShutdownSendRetryAfter = s.ShutdownSendRetryAfter
  	c.ShutdownWatchTerminationGracePeriod = s.ShutdownWatchTerminationGracePeriod
@@ -334,7 +334,7 @@ index f9d574d5d2c..9297363fe6e 100644
  
  	return nil
  }
-@@ -342,5 +356,12 @@ func (s *ServerRunOptions) AddUniversalFlags(fs *pflag.FlagSet) {
+@@ -337,5 +351,12 @@ func (s *ServerRunOptions) AddUniversalFlags(fs *pflag.FlagSet) {
  		"This option, if set, represents the maximum amount of grace period the apiserver will wait "+
  		"for active watch request(s) to drain during the graceful server shutdown window.")
  
@@ -348,5 +348,5 @@ index f9d574d5d2c..9297363fe6e 100644
  	utilfeature.DefaultMutableFeatureGate.AddFlag(fs)
  }
 -- 
-2.40.1
+2.43.0
 

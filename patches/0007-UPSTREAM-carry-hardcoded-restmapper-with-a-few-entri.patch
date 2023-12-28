@@ -1,4 +1,4 @@
-From 43613043dd9d1ec9fcf52f604f7de6b47f2bfa87 Mon Sep 17 00:00:00 2001
+From abf414a933460d41508cbad59a6a60f87ae77931 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: hardcoded restmapper with a few entries to
@@ -14,18 +14,18 @@ OpenShift-Rebase-Source: a00f75daeb5
  create mode 100644 pkg/kubeapiserver/admission/patch_restmapper.go
 
 diff --git a/pkg/kubeapiserver/admission/config.go b/pkg/kubeapiserver/admission/config.go
-index 81712b49cbd..21d28423ef8 100644
+index 751d29f3c86..4af7d1a6264 100644
 --- a/pkg/kubeapiserver/admission/config.go
 +++ b/pkg/kubeapiserver/admission/config.go
-@@ -68,7 +68,7 @@ func (c *Config) New(proxyTransport *http.Transport, egressSelector *egressselec
+@@ -67,7 +67,7 @@ func (c *Config) New(proxyTransport *http.Transport, egressSelector *egressselec
  	discoveryRESTMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
  	kubePluginInitializer := NewPluginInitializer(
  		cloudConfig,
 -		discoveryRESTMapper,
 +		NewAdmissionRESTMapper(discoveryRESTMapper),
  		quotainstall.NewQuotaConfigurationForAdmission(),
- 		schemaResolver,
  	)
+ 
 diff --git a/pkg/kubeapiserver/admission/patch_restmapper.go b/pkg/kubeapiserver/admission/patch_restmapper.go
 new file mode 100644
 index 00000000000..f3980a82cca
@@ -44,5 +44,5 @@ index 00000000000..f3980a82cca
 +	return openshiftrestmapper.NewOpenShiftHardcodedRESTMapper(delegate)
 +}
 -- 
-2.40.1
+2.43.0
 

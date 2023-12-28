@@ -1,4 +1,4 @@
-From d3ad9d2342c04ab323fa4b2bffdb705c7af7e190 Mon Sep 17 00:00:00 2001
+From 220ec303bb8197e4336b569f5ea4782b9a7f7d27 Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -22,12 +22,12 @@ command. This was incorrectly being passed with the "since" value.
  7 files changed, 161 insertions(+), 41 deletions(-)
 
 diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index dde237e8b08..bf2d74f367d 100644
+index 21990f2919a..aa76c1cf2bd 100644
 --- a/pkg/features/kube_features.go
 +++ b/pkg/features/kube_features.go
-@@ -1096,7 +1096,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
+@@ -1136,7 +1136,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
  
- 	NewVolumeManagerReconstruction: {Default: true, PreRelease: featuregate.Beta},
+ 	NFTablesProxyMode: {Default: false, PreRelease: featuregate.Alpha},
  
 -	NodeLogQuery: {Default: false, PreRelease: featuregate.Alpha},
 +	NodeLogQuery: {Default: true, PreRelease: featuregate.Alpha},
@@ -35,7 +35,7 @@ index dde237e8b08..bf2d74f367d 100644
  	NodeOutOfServiceVolumeDetach: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.31
  
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
-index 776a7597372..7ae7801f9e1 100644
+index 913c5dc3bdf..a4300014c5f 100644
 --- a/pkg/kubelet/apis/config/validation/validation_test.go
 +++ b/pkg/kubelet/apis/config/validation/validation_test.go
 @@ -508,6 +508,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
@@ -47,10 +47,10 @@ index 776a7597372..7ae7801f9e1 100644
  			return conf
  		},
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index e8918472ee8..4b9f88d0ca1 100644
+index 62083b62db4..5ff580a7469 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -1548,16 +1548,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
+@@ -1579,16 +1579,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
  					http.Error(w, errs.ToAggregate().Error(), http.StatusBadRequest)
  					return
  				} else if nlq != nil {
@@ -70,7 +70,7 @@ index e8918472ee8..4b9f88d0ca1 100644
  						return
  					}
 diff --git a/pkg/kubelet/kubelet_server_journal.go b/pkg/kubelet/kubelet_server_journal.go
-index bf3114519c6..0506eb4aab7 100644
+index cd3a02649b2..20fc9da6f0d 100644
 --- a/pkg/kubelet/kubelet_server_journal.go
 +++ b/pkg/kubelet/kubelet_server_journal.go
 @@ -35,7 +35,7 @@ import (
@@ -85,7 +85,7 @@ index bf3114519c6..0506eb4aab7 100644
 @@ -54,6 +54,7 @@ var (
  	// character cannot be used to create invalid sequences. This is intended as a broad defense against malformed
  	// input that could cause an escape.
- 	reServiceNameUnsafeCharacters = regexp.MustCompile(`[^a-zA-Z\-_0-9@]+`)
+ 	reServiceNameUnsafeCharacters = regexp.MustCompile(`[^a-zA-Z\-_.:0-9@]+`)
 +	reRelativeDate                = regexp.MustCompile(`^(\+|\-)?[\d]+(s|m|h|d)$`)
  )
  
@@ -331,7 +331,7 @@ index 29f98214713..bbf0e977226 100644
  }
  
 diff --git a/pkg/kubelet/kubelet_server_journal_test.go b/pkg/kubelet/kubelet_server_journal_test.go
-index bdcf14a41bb..0e7b04c2f56 100644
+index 430a73fc27c..4ccc0811733 100644
 --- a/pkg/kubelet/kubelet_server_journal_test.go
 +++ b/pkg/kubelet/kubelet_server_journal_test.go
 @@ -73,10 +73,10 @@ func Test_newNodeLogQuery(t *testing.T) {
@@ -378,7 +378,7 @@ index bdcf14a41bb..0e7b04c2f56 100644
  	}
  	for _, tt := range tests {
  		t.Run(tt.query.Encode(), func(t *testing.T) {
-@@ -165,10 +170,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -173,10 +178,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		pattern  = "foo"
  		invalid  = "foo\\"
  	)
@@ -393,7 +393,7 @@ index bdcf14a41bb..0e7b04c2f56 100644
  
  	tests := []struct {
  		name     string
-@@ -177,23 +184,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -185,23 +192,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		options  options
  		wantErr  bool
  	}{
@@ -462,5 +462,5 @@ index a805cfc5453..5134d65e8d2 100644
  	}
  	var providers []string
 -- 
-2.41.0
+2.43.0
 

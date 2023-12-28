@@ -1,0 +1,506 @@
+From b42d0e700a3ebb9d089e949b3ac2dca57c817dbd Mon Sep 17 00:00:00 2001
+From: Talor Itzhak <titzhak@redhat.com>
+Date: Sun, 12 Nov 2023 09:33:47 +0200
+Subject: [PATCH] UPSTREAM: <carry>: add new admission for handling shared cpus
+
+Adding a new mutation plugin that handles the following:
+
+1. In case of `workload.openshift.io/enable-shared-cpus` request, it
+   adds an annotation to hint runtime about the request. runtime
+   is not aware of extended resources, hence we need the annotation.
+2. It validates the pod's QoS class and return an error if it's not a
+   guaranteed QoS class
+3. It validates that no more than a single resource is being request.
+4. It validates that the pod deployed in a namespace that has mixedcpus
+   workloads allowed annotation.
+
+For more information see - openshift/enhancements#1396
+
+Signed-off-by: Talor Itzhak <titzhak@redhat.com>
+---
+ .../admission/admissionenablement/register.go |   3 +
+ .../managementcpusoverride/admission.go       |   4 +-
+ .../autoscaling/mixedcpus/admission.go        | 152 +++++++++++
+ .../autoscaling/mixedcpus/admission_test.go   | 243 ++++++++++++++++++
+ .../admission/autoscaling/mixedcpus/doc.go    |  10 +
+ 5 files changed, 410 insertions(+), 2 deletions(-)
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+
+diff --git a/openshift-kube-apiserver/admission/admissionenablement/register.go b/openshift-kube-apiserver/admission/admissionenablement/register.go
+index 1b6e863c105..51de550f5be 100644
+--- a/openshift-kube-apiserver/admission/admissionenablement/register.go
++++ b/openshift-kube-apiserver/admission/admissionenablement/register.go
+@@ -5,6 +5,7 @@ import (
+ 	"k8s.io/apiserver/pkg/admission"
+ 	"k8s.io/apiserver/pkg/admission/plugin/resourcequota"
+ 	mutatingwebhook "k8s.io/apiserver/pkg/admission/plugin/webhook/mutating"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/mixedcpus"
+ 
+ 	"github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy"
+ 	imagepolicyapiv1 "github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy/apis/imagepolicy/v1"
+@@ -32,6 +33,7 @@ func RegisterOpenshiftKubeAdmissionPlugins(plugins *admission.Plugins) {
+ 	ingressadmission.Register(plugins)
+ 	managementcpusoverride.Register(plugins)
+ 	managednode.Register(plugins)
++	mixedcpus.Register(plugins)
+ 	projectnodeenv.Register(plugins)
+ 	quotaclusterresourceoverride.Register(plugins)
+ 	quotaclusterresourcequota.Register(plugins)
+@@ -74,6 +76,7 @@ var (
+ 		hostassignment.PluginName,          // "route.openshift.io/RouteHostAssignment"
+ 		csiinlinevolumesecurity.PluginName, // "storage.openshift.io/CSIInlineVolumeSecurity"
+ 		managednode.PluginName,             // "autoscaling.openshift.io/ManagedNode"
++		mixedcpus.PluginName,               // "autoscaling.openshift.io/MixedCPUs"
+ 	}
+ 
+ 	// openshiftAdmissionPluginsForKubeAfterResourceQuota are the plugins to add after ResourceQuota plugin
+diff --git a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+index c672aeced20..67430547422 100644
+--- a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
++++ b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+@@ -378,7 +378,7 @@ func updateContainersResources(containers []coreapi.Container, podAnnotations ma
+ 	}
+ }
+ 
+-func isGuaranteed(containers []coreapi.Container) bool {
++func IsGuaranteed(containers []coreapi.Container) bool {
+ 	for _, c := range containers {
+ 		// only memory and CPU resources are relevant to decide pod QoS class
+ 		for _, r := range []coreapi.ResourceName{coreapi.ResourceMemory, coreapi.ResourceCPU} {
+@@ -425,7 +425,7 @@ func isBestEffort(containers []coreapi.Container) bool {
+ }
+ 
+ func getPodQoSClass(containers []coreapi.Container) coreapi.PodQOSClass {
+-	if isGuaranteed(containers) {
++	if IsGuaranteed(containers) {
+ 		return coreapi.PodQOSGuaranteed
+ 	}
+ 
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+new file mode 100644
+index 00000000000..61a7aa614ad
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+@@ -0,0 +1,152 @@
++package mixedcpus
++
++import (
++	"context"
++	"fmt"
++	"io"
++	v1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/api/errors"
++	"k8s.io/apimachinery/pkg/api/resource"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/admission/initializer"
++	"k8s.io/client-go/informers"
++	"k8s.io/client-go/kubernetes"
++	corev1listers "k8s.io/client-go/listers/core/v1"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride"
++	coreapi "k8s.io/kubernetes/pkg/apis/core"
++)
++
++const (
++	PluginName       = "autoscaling.openshift.io/MixedCPUs"
++	annotationEnable = "enable"
++	// containerResourceRequestName is the name of the resource that should be specified under the container's request in the pod spec
++	containerResourceRequestName = "workload.openshift.io/enable-shared-cpus"
++	// runtimeAnnotationPrefix is the prefix for the annotation that is expected by the runtime
++	runtimeAnnotationPrefix = "cpu-shared.crio.io"
++	// namespaceAllowedAnnotation contains the namespace allowed annotation key
++	namespaceAllowedAnnotation = "workload.mixedcpus.openshift.io/allowed"
++)
++
++var _ = initializer.WantsExternalKubeClientSet(&mixedCPUsMutation{})
++var _ = initializer.WantsExternalKubeInformerFactory(&mixedCPUsMutation{})
++var _ = admission.MutationInterface(&mixedCPUsMutation{})
++
++type mixedCPUsMutation struct {
++	*admission.Handler
++	client          kubernetes.Interface
++	podLister       corev1listers.PodLister
++	podListerSynced func() bool
++	nsLister        corev1listers.NamespaceLister
++	nsListerSynced  func() bool
++}
++
++func Register(plugins *admission.Plugins) {
++	plugins.Register(PluginName,
++		func(config io.Reader) (admission.Interface, error) {
++			return &mixedCPUsMutation{
++				Handler: admission.NewHandler(admission.Create),
++			}, nil
++		})
++}
++
++// SetExternalKubeClientSet implements the WantsExternalKubeClientSet interface.
++func (s *mixedCPUsMutation) SetExternalKubeClientSet(client kubernetes.Interface) {
++	s.client = client
++}
++
++func (s *mixedCPUsMutation) SetExternalKubeInformerFactory(kubeInformers informers.SharedInformerFactory) {
++	s.podLister = kubeInformers.Core().V1().Pods().Lister()
++	s.podListerSynced = kubeInformers.Core().V1().Pods().Informer().HasSynced
++	s.nsLister = kubeInformers.Core().V1().Namespaces().Lister()
++	s.nsListerSynced = kubeInformers.Core().V1().Namespaces().Informer().HasSynced
++}
++
++func (s *mixedCPUsMutation) ValidateInitialization() error {
++	if s.client == nil {
++		return fmt.Errorf("%s plugin needs a kubernetes client", PluginName)
++	}
++	if s.podLister == nil {
++		return fmt.Errorf("%s did not get a pod lister", PluginName)
++	}
++	if s.podListerSynced == nil {
++		return fmt.Errorf("%s plugin needs a pod lister synced", PluginName)
++	}
++	if s.nsLister == nil {
++		return fmt.Errorf("%s did not get a namespace lister", PluginName)
++	}
++	if s.nsListerSynced == nil {
++		return fmt.Errorf("%s plugin needs a namespace lister synced", PluginName)
++	}
++	return nil
++}
++
++func (s *mixedCPUsMutation) Admit(ctx context.Context, attr admission.Attributes, o admission.ObjectInterfaces) error {
++	if attr.GetResource().GroupResource() != coreapi.Resource("pods") || attr.GetSubresource() != "" {
++		return nil
++	}
++
++	pod, ok := attr.GetObject().(*coreapi.Pod)
++	if !ok {
++		return admission.NewForbidden(attr, fmt.Errorf("%s unexpected object: %#v", attr.GetObject(), PluginName))
++	}
++
++	for i := 0; i < len(pod.Spec.Containers); i++ {
++		cnt := &pod.Spec.Containers[i]
++		requested, v := isContainerRequestForSharedCPUs(cnt)
++		if !requested {
++			continue
++		}
++		ns, err := s.getPodNs(ctx, pod.Namespace)
++		if err != nil {
++			return fmt.Errorf("%s %w", PluginName, err)
++		}
++		_, found := ns.Annotations[namespaceAllowedAnnotation]
++		if !found {
++			return admission.NewForbidden(attr, fmt.Errorf("%s pod %s namespace %s is not allowed for %s resource request", PluginName, pod.Name, pod.Namespace, containerResourceRequestName))
++		}
++		if !managementcpusoverride.IsGuaranteed(pod.Spec.Containers) {
++			return admission.NewForbidden(attr, fmt.Errorf("%s %s/%s requests for %q resource but pod is not Guaranteed QoS class", PluginName, pod.Name, cnt.Name, containerResourceRequestName))
++		}
++		if v.Value() > 1 {
++			return admission.NewForbidden(attr, fmt.Errorf("%s %s/%s more than a single %q resource is forbiden, please set the request to 1 or remove it", PluginName, pod.Name, cnt.Name, containerResourceRequestName))
++		}
++		addRuntimeAnnotation(pod, cnt.Name)
++	}
++	return nil
++}
++
++func (s *mixedCPUsMutation) getPodNs(ctx context.Context, nsName string) (*v1.Namespace, error) {
++	ns, err := s.nsLister.Get(nsName)
++	if err != nil {
++		if !errors.IsNotFound(err) {
++			return nil, fmt.Errorf("%s failed to retrieve namespace %q from lister; %w", PluginName, nsName, err)
++		}
++		// cache didn't update fast enough
++		ns, err = s.client.CoreV1().Namespaces().Get(ctx, nsName, metav1.GetOptions{})
++		if err != nil {
++			return nil, fmt.Errorf("%s failed to retrieve namespace %q from api server; %w", PluginName, nsName, err)
++		}
++	}
++	return ns, nil
++}
++
++func isContainerRequestForSharedCPUs(container *coreapi.Container) (bool, resource.Quantity) {
++	for rName, quan := range container.Resources.Requests {
++		if rName == containerResourceRequestName {
++			return true, quan
++		}
++	}
++	return false, resource.Quantity{}
++}
++
++func addRuntimeAnnotation(pod *coreapi.Pod, cntName string) {
++	if pod.Annotations == nil {
++		pod.Annotations = map[string]string{}
++	}
++	pod.Annotations[getRuntimeAnnotationName(cntName)] = annotationEnable
++}
++
++func getRuntimeAnnotationName(cntName string) string {
++	return fmt.Sprintf("%s/%s", runtimeAnnotationPrefix, cntName)
++}
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+new file mode 100644
+index 00000000000..89d6dab6710
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+@@ -0,0 +1,243 @@
++package mixedcpus
++
++import (
++	"context"
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/api/errors"
++	"k8s.io/apimachinery/pkg/api/resource"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/authentication/user"
++	"k8s.io/client-go/kubernetes/fake"
++	corev1listers "k8s.io/client-go/listers/core/v1"
++	"k8s.io/client-go/tools/cache"
++	coreapi "k8s.io/kubernetes/pkg/apis/core"
++	"k8s.io/kubernetes/test/e2e/framework/pod"
++)
++
++func TestAdmit(t *testing.T) {
++	testCases := []struct {
++		name              string
++		pod               *coreapi.Pod
++		ns                *corev1.Namespace
++		expectedPodStatus *errors.StatusError
++		// container names that should have the runtime annotation
++		expectedContainersWithAnnotations []string
++	}{
++		{
++			name: "one container, requests single resources",
++			pod: makePod("test1", withNs("foo"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				)),
++			ns:                                makeNs("foo", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{"cnt1"},
++			expectedPodStatus:                 nil,
++		},
++		{
++			name: "two containers, only one of them requests single resource",
++			pod: makePod("test1", withNs("foo"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:    resource.MustParse("1"),
++						coreapi.ResourceMemory: resource.MustParse("100Mi"),
++					},
++				),
++				withGuaranteedContainer("cnt2",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				)),
++			ns:                                makeNs("foo", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{"cnt2"},
++			expectedPodStatus:                 nil,
++		},
++		{
++			name: "two containers, one of them requests more than single resource",
++			pod: makePod("test1", withNs("bar"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++				withGuaranteedContainer("cnt2",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("2"),
++					},
++				)),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++		{
++			name: "one container, pod is not Guaranteed QoS class",
++			pod: makePod("test1", withNs("bar"),
++				withContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++			),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++		{
++			name: "one container, pod is not in allowed namespace",
++			pod: makePod("test1",
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++			),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++	}
++
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			testPod := tc.pod
++			mutation, err := getMockMixedCPUsMutation(testPod, tc.ns)
++			if err != nil {
++				t.Fatalf("%v", err)
++			}
++			attrs := admission.NewAttributesRecord(testPod,
++				nil,
++				schema.GroupVersionKind{},
++				testPod.Namespace,
++				testPod.Name,
++				coreapi.Resource("pods").WithVersion("version"),
++				"",
++				admission.Create,
++				nil,
++				false,
++				fakeUser())
++
++			err = mutation.Admit(context.TODO(), attrs, nil)
++			if err != nil && tc.expectedPodStatus == nil {
++				t.Errorf("%s: unexpected error %v", tc.name, err)
++			}
++
++			if err != nil {
++				if !errors.IsForbidden(tc.expectedPodStatus) {
++					t.Errorf("%s: forbidden error was expected. got %v instead", tc.name, err)
++				}
++			}
++
++			testPod, _ = attrs.GetObject().(*coreapi.Pod)
++			for _, cntName := range tc.expectedContainersWithAnnotations {
++				if v, ok := testPod.Annotations[getRuntimeAnnotationName(cntName)]; !ok || v != annotationEnable {
++					t.Errorf("%s: container %s is missing runtime annotation", tc.name, cntName)
++				}
++			}
++		})
++	}
++}
++
++func fakeUser() user.Info {
++	return &user.DefaultInfo{
++		Name: "testuser",
++	}
++}
++
++func makeNs(name string, annotations map[string]string) *corev1.Namespace {
++	return &corev1.Namespace{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:        name,
++			Annotations: annotations,
++		},
++	}
++}
++
++func makePod(name string, opts ...func(pod *coreapi.Pod)) *coreapi.Pod {
++	p := &coreapi.Pod{
++		ObjectMeta: metav1.ObjectMeta{
++			Name: name,
++		},
++	}
++	for _, opt := range opts {
++		opt(p)
++	}
++	return p
++}
++
++func withContainer(name string, requests coreapi.ResourceList) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		cnt := coreapi.Container{
++			Name:  name,
++			Image: pod.GetDefaultTestImage(),
++			Resources: coreapi.ResourceRequirements{
++				Requests: requests,
++			},
++		}
++		p.Spec.Containers = append(p.Spec.Containers, cnt)
++	}
++}
++
++func withGuaranteedContainer(name string, requests coreapi.ResourceList) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		withContainer(name, requests)(p)
++		for i := 0; i < len(p.Spec.Containers); i++ {
++			cnt := &p.Spec.Containers[i]
++			if cnt.Name == name {
++				cnt.Resources.Limits = cnt.Resources.Requests
++			}
++		}
++	}
++}
++
++func withNs(name string) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		p.Namespace = name
++	}
++}
++
++func fakePodLister(pod *coreapi.Pod) corev1listers.PodLister {
++	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
++	if pod != nil {
++		_ = indexer.Add(pod)
++	}
++	return corev1listers.NewPodLister(indexer)
++}
++
++func fakeNsLister(ns *corev1.Namespace) corev1listers.NamespaceLister {
++	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
++	_ = indexer.Add(ns)
++	return corev1listers.NewNamespaceLister(indexer)
++}
++
++func getMockMixedCPUsMutation(pod *coreapi.Pod, ns *corev1.Namespace) (*mixedCPUsMutation, error) {
++	m := &mixedCPUsMutation{
++		Handler:         admission.NewHandler(admission.Create),
++		client:          &fake.Clientset{},
++		podListerSynced: func() bool { return true },
++		podLister:       fakePodLister(pod),
++		nsListerSynced:  func() bool { return true },
++		nsLister:        fakeNsLister(ns),
++	}
++	if err := m.ValidateInitialization(); err != nil {
++		return nil, err
++	}
++
++	return m, nil
++}
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+new file mode 100644
+index 00000000000..bac1a688e1e
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+@@ -0,0 +1,10 @@
++package mixedcpus
++
++//The admission should provide the following functionalities:
++//1. In case a user specifies more than a single `openshift.io/enable-shared-cpus` resource,
++//it rejects the pod request with an error explaining the user how to fix its pod spec.
++//2. It rejects a non-guaranteed pod which is asking for `openshift.io/enable-shared-cpus` resource.
++//3. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that shared cpus were requested.
++//For every container requested for shared cpus, it adds an annotation with the following scheme:
++//`cpu-shared.crio.io/<container name>`
++//4. It validates that the pod deployed in a namespace that has `workload.mixedcpus.openshift.io/allowed` annotation.
+-- 
+2.43.0
+

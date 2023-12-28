@@ -1,0 +1,51 @@
+From 806aa05c6bc7ba18082a71b35a23a18dadb56b3e Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Mon, 22 Feb 2021 14:11:49 -0500
+Subject: [PATCH] UPSTREAM: <carry>: use hardcoded metrics scraping authorizer
+ for delegated apiservers
+
+OpenShift-Rebase-Source: d8adc0939f2
+---
+ openshift-kube-apiserver/openshiftkubeapiserver/patch.go      | 3 +++
+ .../src/k8s.io/apiserver/pkg/server/options/authorization.go  | 4 ++++
+ 2 files changed, 7 insertions(+)
+
+diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+index 39172be5b88..9fd2b00659a 100644
+--- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
++++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+@@ -35,6 +35,9 @@ import (
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managednode"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/scheduler/nodeenv"
++
++	// magnet to get authorizer package in hack/update-vendor.sh
++	_ "github.com/openshift/library-go/pkg/authorization/hardcodedauthorizer"
+ )
+ 
+ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, kubeInformers clientgoinformers.SharedInformerFactory, pluginInitializers *[]admission.PluginInitializer) error {
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go b/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go
+index 22fd4b18ce0..d726201fd50 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go
+@@ -22,6 +22,7 @@ import (
+ 
+ 	"github.com/spf13/pflag"
+ 
++	"github.com/openshift/library-go/pkg/authorization/hardcodedauthorizer"
+ 	"k8s.io/apimachinery/pkg/util/wait"
+ 	"k8s.io/apiserver/pkg/authorization/authorizer"
+ 	"k8s.io/apiserver/pkg/authorization/authorizerfactory"
+@@ -181,6 +182,9 @@ func (s *DelegatingAuthorizationOptions) toAuthorizer(client kubernetes.Interfac
+ 		authorizers = append(authorizers, authorizerfactory.NewPrivilegedGroups(s.AlwaysAllowGroups...))
+ 	}
+ 
++	// add an authorizer to always approver the openshift metrics scraper.
++	authorizers = append(authorizers, hardcodedauthorizer.NewHardCodedMetricsAuthorizer())
++
+ 	if len(s.AlwaysAllowPaths) > 0 {
+ 		a, err := path.NewAuthorizer(s.AlwaysAllowPaths)
+ 		if err != nil {
+-- 
+2.43.0
+

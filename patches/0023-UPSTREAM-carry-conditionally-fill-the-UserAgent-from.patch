@@ -1,0 +1,43 @@
+From 87c998eea10d15167a2c26f884789698e68c352f Mon Sep 17 00:00:00 2001
+From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
+Date: Thu, 29 Oct 2020 13:55:59 +0100
+Subject: [PATCH] UPSTREAM: <carry>: conditionally fill the UserAgent from the
+ currently running test
+
+OpenShift uses these function before any test is run and they cause NPE
+
+OpenShift-Rebase-Source: 834af764f65
+---
+ test/e2e/framework/util.go | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/e2e/framework/util.go b/test/e2e/framework/util.go
+index c7e1de316c4..bcbdc3c8bac 100644
+--- a/test/e2e/framework/util.go
++++ b/test/e2e/framework/util.go
+@@ -522,9 +522,9 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
+ type ClientConfigGetter func() (*restclient.Config, error)
+ 
+ // LoadConfig returns a config for a rest client with the UserAgent set to include the current test name.
+-func LoadConfig() (config *restclient.Config, err error) {
++func LoadConfig(noUserAgent ...bool) (config *restclient.Config, err error) {
+ 	defer func() {
+-		if err == nil && config != nil {
++		if err == nil && config != nil && len(noUserAgent) == 0 {
+ 			testDesc := ginkgo.CurrentSpecReport()
+ 			if len(testDesc.ContainerHierarchyTexts) > 0 {
+ 				testName := strings.Join(testDesc.ContainerHierarchyTexts, " ")
+@@ -566,8 +566,8 @@ func LoadConfig() (config *restclient.Config, err error) {
+ }
+ 
+ // LoadClientset returns clientset for connecting to kubernetes clusters.
+-func LoadClientset() (*clientset.Clientset, error) {
+-	config, err := LoadConfig()
++func LoadClientset(noUserAgent ...bool) (*clientset.Clientset, error) {
++	config, err := LoadConfig(noUserAgent...)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("error creating client: %v", err.Error())
+ 	}
+-- 
+2.43.0
+

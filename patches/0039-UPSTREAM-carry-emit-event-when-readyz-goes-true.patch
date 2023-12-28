@@ -1,0 +1,52 @@
+From 8efb145c87b95c149166cedcbfd04ed050796952 Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Mon, 14 Jun 2021 15:49:49 -0400
+Subject: [PATCH] UPSTREAM: <carry>: emit event when readyz goes true
+
+OpenShift-Rebase-Source: 6386eb2dafe
+---
+ pkg/controlplane/controller/kubernetesservice/controller.go | 2 ++
+ pkg/controlplane/controller/kubernetesservice/patch.go      | 5 +++++
+ pkg/controlplane/instance.go                                | 1 +
+ 3 files changed, 8 insertions(+)
+ create mode 100644 pkg/controlplane/controller/kubernetesservice/patch.go
+
+diff --git a/pkg/controlplane/controller/kubernetesservice/controller.go b/pkg/controlplane/controller/kubernetesservice/controller.go
+index 4966eb9738b..6cc4e93b27b 100644
+--- a/pkg/controlplane/controller/kubernetesservice/controller.go
++++ b/pkg/controlplane/controller/kubernetesservice/controller.go
+@@ -151,6 +151,8 @@ func (c *Controller) Run(ch <-chan struct{}) {
+ 		return code == http.StatusOK, nil
+ 	}, ch)
+ 
++	KubeAPIServerEmitEventFn(corev1.EventTypeWarning, "KubeAPIReadyz", "readyz=true")
++
+ 	wait.NonSlidingUntil(func() {
+ 		// Service definition is not reconciled after first
+ 		// run, ports and type will be corrected only during
+diff --git a/pkg/controlplane/controller/kubernetesservice/patch.go b/pkg/controlplane/controller/kubernetesservice/patch.go
+new file mode 100644
+index 00000000000..d78731dda37
+--- /dev/null
++++ b/pkg/controlplane/controller/kubernetesservice/patch.go
+@@ -0,0 +1,5 @@
++package kubernetesservice
++
++var KubeAPIServerEmitEventFn EventSinkFunc = nil
++
++type EventSinkFunc func(eventType, reason, messageFmt string, args ...interface{})
+diff --git a/pkg/controlplane/instance.go b/pkg/controlplane/instance.go
+index 73aec574b18..44a9b9bf7c7 100644
+--- a/pkg/controlplane/instance.go
++++ b/pkg/controlplane/instance.go
+@@ -413,6 +413,7 @@ func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget)
+ 		GenericAPIServer:          s,
+ 		ClusterAuthenticationInfo: c.ExtraConfig.ClusterAuthenticationInfo,
+ 	}
++	kubernetesservice.KubeAPIServerEmitEventFn = m.GenericAPIServer.Eventf
+ 
+ 	clientset, err := kubernetes.NewForConfig(c.GenericConfig.LoopbackClientConfig)
+ 	if err != nil {
+-- 
+2.43.0
+

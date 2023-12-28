@@ -1,4 +1,4 @@
-From 27bee20e4513344c204262a2660d497f5efa791d Mon Sep 17 00:00:00 2001
+From 483b744d1322c48fe2145a985368d6415fe379af Mon Sep 17 00:00:00 2001
 From: Abhinav Dahiya <abhinav.dahiya@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: 84466: gce: ensureInternalInstanceGroups: reuse
@@ -375,5 +375,5 @@ index e656d9e7261..6cc61aa6118 100644
  	vals := DefaultTestClusterValues()
  	gce, err := fakeGCECloud(vals)
 -- 
-2.40.1
+2.43.0
 

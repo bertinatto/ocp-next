@@ -1,4 +1,4 @@
-From 2acb6cfb7bfa53b66abbc554275620feb3cdf34a Mon Sep 17 00:00:00 2001
+From 661c0da0c67441f1db0312dfa451a0774620e5e6 Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:54 +0100
 Subject: [PATCH] UPSTREAM: 74956: apiserver: switch authorization to use
@@ -26,5 +26,5 @@ index 9b2dcb3fff7..22fd4b18ce0 100644
 +	return kubernetes.NewForConfig(protoConfig)
  }
 -- 
-2.40.1
+2.43.0
 

@@ -1,4 +1,4 @@
-From 11215e493e20c54d32c04daac5e51f60d5b097f3 Mon Sep 17 00:00:00 2001
+From 4ec25f0f6fd40eb93c81e692ff398c087da64ffd Mon Sep 17 00:00:00 2001
 From: Tomas Nozicka <tnozicka@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:29 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Release lock on KCM and KS termination
@@ -18,13 +18,13 @@ UPSTREAM: <carry>: Release lock on KCM and KS termination
  4 files changed, 105 insertions(+), 12 deletions(-)
 
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index 929ae427b8e..caf3985baa6 100644
+index 529a4b27a36..588865dae2d 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -36,6 +36,7 @@ import (
+ 	"k8s.io/apimachinery/pkg/util/sets"
  	"k8s.io/apimachinery/pkg/util/uuid"
  	"k8s.io/apimachinery/pkg/util/wait"
- 	genericfeatures "k8s.io/apiserver/pkg/features"
 +	"k8s.io/apiserver/pkg/server"
  	"k8s.io/apiserver/pkg/server/healthz"
  	"k8s.io/apiserver/pkg/server/mux"
@@ -52,8 +52,8 @@ index 929ae427b8e..caf3985baa6 100644
  
  	// To help debugging, immediately log version
  	logger.Info("Starting", "version", version.Get())
-@@ -321,10 +324,18 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
- 				run(ctx, startSATokenController, initializersFunc)
+@@ -323,10 +326,18 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
+ 				run(ctx, controllerDescriptors)
  			},
  			OnStoppedLeading: func() {
 -				logger.Error(nil, "leaderelection lost")
@@ -74,8 +74,8 @@ index 929ae427b8e..caf3985baa6 100644
  
  	// If Leader Migration is enabled, proceed to attempt the migration lock.
  	if leaderMigrator != nil {
-@@ -345,10 +356,18 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
- 					run(ctx, nil, createInitializersFunc(leaderMigrator.FilterFunc, leadermigration.ControllerMigrated))
+@@ -350,10 +361,18 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
+ 					run(ctx, controllerDescriptors)
  				},
  				OnStoppedLeading: func() {
 -					logger.Error(nil, "migration leaderelection lost")
@@ -96,7 +96,7 @@ index 929ae427b8e..caf3985baa6 100644
  	}
  
  	<-stopCh
-@@ -771,7 +790,7 @@ func createClientBuilders(logger klog.Logger, c *config.CompletedConfig) (client
+@@ -861,7 +880,7 @@ func createClientBuilders(logger klog.Logger, c *config.CompletedConfig) (client
  
  // leaderElectAndRun runs the leader election, and runs the callbacks once the leader lease is acquired.
  // TODO: extract this function into staging/controller-manager
@@ -105,7 +105,7 @@ index 929ae427b8e..caf3985baa6 100644
  	logger := klog.FromContext(ctx)
  	rl, err := resourcelock.NewFromKubeconfig(resourceLock,
  		c.ComponentConfig.Generic.LeaderElection.ResourceNamespace,
-@@ -787,7 +806,13 @@ func leaderElectAndRun(ctx context.Context, c *config.CompletedConfig, lockIdent
+@@ -877,7 +896,13 @@ func leaderElectAndRun(ctx context.Context, c *config.CompletedConfig, lockIdent
  		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
  	}
  
@@ -204,10 +204,10 @@ index 7ab5a7662ec..fad35b4620e 100644
 +	}
 +}
 diff --git a/cmd/kube-controller-manager/app/testing/testserver.go b/cmd/kube-controller-manager/app/testing/testserver.go
-index 69a631920a5..c48e132d4bb 100644
+index 51471ed8a60..272ce79333a 100644
 --- a/cmd/kube-controller-manager/app/testing/testserver.go
 +++ b/cmd/kube-controller-manager/app/testing/testserver.go
-@@ -115,7 +115,8 @@ func StartTestServer(ctx context.Context, customFlags []string) (result TestServ
+@@ -122,7 +122,8 @@ func StartTestServer(ctx context.Context, customFlags []string) (result TestServ
  	go func(ctx context.Context) {
  		defer close(errCh)
  
@@ -218,5 +218,5 @@ index 69a631920a5..c48e132d4bb 100644
  		}
  	}(ctx)
 -- 
-2.40.1
+2.43.0
 

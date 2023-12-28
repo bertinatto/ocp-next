@@ -1,4 +1,4 @@
-From 8c7275f1dd66e4342f6ef9bd71512335c0264ec1 Mon Sep 17 00:00:00 2001
+From 6c0c9d35bfd735c1ca396621e2814e615a3c2e11 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: 93286: wait for apiservices on startup
@@ -9,7 +9,7 @@ OpenShift-Rebase-Source: 5a2488cd16c
  1 file changed, 41 insertions(+), 3 deletions(-)
 
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index cf83c3a6fe5..4c83d8474b9 100644
+index f0f2b7140b4..77fa59d19d5 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 @@ -20,11 +20,14 @@ import (
@@ -27,7 +27,7 @@ index cf83c3a6fe5..4c83d8474b9 100644
  	"k8s.io/apimachinery/pkg/util/sets"
  	"k8s.io/apimachinery/pkg/util/wait"
  	"k8s.io/apiserver/pkg/endpoints/discovery/aggregated"
-@@ -35,8 +38,9 @@ import (
+@@ -36,8 +39,9 @@ import (
  	serverstorage "k8s.io/apiserver/pkg/server/storage"
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
  	"k8s.io/client-go/kubernetes"
@@ -38,7 +38,7 @@ index cf83c3a6fe5..4c83d8474b9 100644
  	v1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
  	v1helper "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1/helper"
  	"k8s.io/kube-aggregator/pkg/apis/apiregistration/v1beta1"
-@@ -330,6 +334,33 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
+@@ -342,6 +346,33 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
  		go availableController.Run(5, context.StopCh)
  		return nil
  	})
@@ -72,7 +72,7 @@ index cf83c3a6fe5..4c83d8474b9 100644
  
  	if utilfeature.DefaultFeatureGate.Enabled(genericfeatures.StorageVersionAPI) &&
  		utilfeature.DefaultFeatureGate.Enabled(genericfeatures.APIServerIdentity) {
-@@ -492,7 +523,11 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
+@@ -506,7 +537,11 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
  	}
  	proxyHandler.updateAPIService(apiService)
  	if s.openAPIAggregationController != nil {
@@ -85,7 +85,7 @@ index cf83c3a6fe5..4c83d8474b9 100644
  	}
  	if s.openAPIV3AggregationController != nil {
  		s.openAPIV3AggregationController.AddAPIService(proxyHandler, apiService)
-@@ -501,7 +536,10 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
+@@ -515,7 +550,10 @@ func (s *APIAggregator) AddAPIService(apiService *v1.APIService) error {
  		s.discoveryAggregationController.AddAPIService(apiService, proxyHandler)
  	}
  
@@ -98,5 +98,5 @@ index cf83c3a6fe5..4c83d8474b9 100644
  	s.GenericAPIServer.Handler.NonGoRestfulMux.UnlistedHandlePrefix(proxyPath+"/", proxyHandler)
  
 -- 
-2.40.1
+2.43.0
 

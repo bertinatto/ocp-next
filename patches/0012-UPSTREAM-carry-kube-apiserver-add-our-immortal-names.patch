@@ -1,0 +1,36 @@
+From 81b2f51114af0bdd47fd09cd0c130b406f2b643d Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Thu, 29 Oct 2020 13:55:56 +0100
+Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: add our immortal
+ namespaces directly to admission plugin
+
+OpenShift-Rebase-Source: dd3aeca5cde
+---
+ .../admission/plugin/namespace/lifecycle/admission.go | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle/admission.go b/staging/src/k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle/admission.go
+index 936a95e45cc..cec6769c65d 100644
+--- a/staging/src/k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle/admission.go
++++ b/staging/src/k8s.io/apiserver/pkg/admission/plugin/namespace/lifecycle/admission.go
+@@ -54,7 +54,16 @@ const (
+ // Register registers a plugin
+ func Register(plugins *admission.Plugins) {
+ 	plugins.Register(PluginName, func(config io.Reader) (admission.Interface, error) {
+-		return NewLifecycle(sets.NewString(metav1.NamespaceDefault, metav1.NamespaceSystem, metav1.NamespacePublic))
++		return NewLifecycle(sets.NewString(metav1.NamespaceDefault, metav1.NamespaceSystem, metav1.NamespacePublic,
++			// user specified configuration that cannot be rebuilt
++			"openshift-config",
++			// cluster generated configuration that cannot be rebuilt (etcd encryption keys)
++			"openshift-config-managed",
++			// the CVO which is the root we use to rebuild all the rest
++			"openshift-cluster-version",
++			// contains a namespaced list of all nodes in the cluster (yeah, weird.  they do it for multi-tenant management I think?)
++			"openshift-machine-api",
++		))
+ 	})
+ }
+ 
+-- 
+2.43.0
+

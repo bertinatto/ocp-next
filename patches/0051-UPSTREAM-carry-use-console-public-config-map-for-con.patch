@@ -1,4 +1,4 @@
-From d01af44e9d9b532dd4d8c1c8d8a5e1d69318e7e2 Mon Sep 17 00:00:00 2001
+From 6cb6a49b0478851b05daf8a5e6937dcba7789249 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Filip=20K=C5=99epinsk=C3=BD?= <fkrepins@redhat.com>
 Date: Wed, 12 Jan 2022 13:58:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: use console-public config map for console
@@ -100,5 +100,5 @@ index e7a2dd2afcb..4a7150a8699 100644
  }
  
 -- 
-2.40.1
+2.43.0
 

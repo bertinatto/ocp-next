@@ -1,4 +1,4 @@
-From 38f541983f1b6ecf57199793474cc58fecf9270e Mon Sep 17 00:00:00 2001
+From 6ad03556d8aec33912f7e4ca480de661a22f6a80 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 26 Aug 2021 12:38:01 +0200
 Subject: [PATCH] UPSTREAM: <carry>: sets X-OpenShift-Internal-If-Not-Ready
@@ -28,7 +28,7 @@ index 38b64663b18..3f79b64304c 100644
 +	CustomRoundTrippers                 []transport.WrapperFunc
  }
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index d5088fdbb3b..929ae427b8e 100644
+index e3a2c7563bb..529a4b27a36 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -137,7 +137,7 @@ controller, and serviceaccounts controller.`,
@@ -41,10 +41,10 @@ index d5088fdbb3b..929ae427b8e 100644
  				os.Exit(1)
  			}
 diff --git a/cmd/kube-controller-manager/app/options/options.go b/cmd/kube-controller-manager/app/options/options.go
-index 70085ad29f2..abdc1f1329e 100644
+index b777b6cfe06..0e0e1e195a0 100644
 --- a/cmd/kube-controller-manager/app/options/options.go
 +++ b/cmd/kube-controller-manager/app/options/options.go
-@@ -445,6 +445,9 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
+@@ -456,6 +456,9 @@ func (s KubeControllerManagerOptions) Config(allControllers []string, disabledBy
  		libgorestclient.DefaultServerName(kubeconfig)
  		kubeconfig.Wrap(s.OpenShiftContext.PreferredHostRoundTripperWrapperFn)
  	}
@@ -205,5 +205,5 @@ index 00000000000..7ab5a7662ec
 +	return rt(r)
 +}
 -- 
-2.40.1
+2.43.0
 
