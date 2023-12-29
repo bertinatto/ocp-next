@@ -1,0 +1,113 @@
+From 10d4375f1d044fcce30b143f0e90cb2e532737f0 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Fri, 29 Dec 2023 15:24:20 -0300
+Subject: [PATCH] UPSTREAM: <drop>: Revert "update util/sets to use standard
+ package cmp"
+
+This reverts commit c26bb7eb85aeb059c127a478f1c6abc512c0e6ce.
+---
+ .../apimachinery/pkg/util/sets/ordered.go     | 53 +++++++++++++++++++
+ .../k8s.io/apimachinery/pkg/util/sets/set.go  |  7 ++-
+ 2 files changed, 56 insertions(+), 4 deletions(-)
+ create mode 100644 staging/src/k8s.io/apimachinery/pkg/util/sets/ordered.go
+
+diff --git a/staging/src/k8s.io/apimachinery/pkg/util/sets/ordered.go b/staging/src/k8s.io/apimachinery/pkg/util/sets/ordered.go
+new file mode 100644
+index 00000000000..443dac62eb3
+--- /dev/null
++++ b/staging/src/k8s.io/apimachinery/pkg/util/sets/ordered.go
+@@ -0,0 +1,53 @@
++/*
++Copyright 2022 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package sets
++
++// ordered is a constraint that permits any ordered type: any type
++// that supports the operators < <= >= >.
++// If future releases of Go add new ordered types,
++// this constraint will be modified to include them.
++type ordered interface {
++	integer | float | ~string
++}
++
++// integer is a constraint that permits any integer type.
++// If future releases of Go add new predeclared integer types,
++// this constraint will be modified to include them.
++type integer interface {
++	signed | unsigned
++}
++
++// float is a constraint that permits any floating-point type.
++// If future releases of Go add new predeclared floating-point types,
++// this constraint will be modified to include them.
++type float interface {
++	~float32 | ~float64
++}
++
++// signed is a constraint that permits any signed integer type.
++// If future releases of Go add new predeclared signed integer types,
++// this constraint will be modified to include them.
++type signed interface {
++	~int | ~int8 | ~int16 | ~int32 | ~int64
++}
++
++// unsigned is a constraint that permits any unsigned integer type.
++// If future releases of Go add new predeclared unsigned integer types,
++// this constraint will be modified to include them.
++type unsigned interface {
++	~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
++}
+diff --git a/staging/src/k8s.io/apimachinery/pkg/util/sets/set.go b/staging/src/k8s.io/apimachinery/pkg/util/sets/set.go
+index b76129a1ca2..1e6d573d78b 100644
+--- a/staging/src/k8s.io/apimachinery/pkg/util/sets/set.go
++++ b/staging/src/k8s.io/apimachinery/pkg/util/sets/set.go
+@@ -17,7 +17,6 @@ limitations under the License.
+ package sets
+ 
+ import (
+-	"cmp"
+ 	"sort"
+ )
+ 
+@@ -194,7 +193,7 @@ func (s1 Set[T]) Equal(s2 Set[T]) bool {
+ 	return len(s1) == len(s2) && s1.IsSuperset(s2)
+ }
+ 
+-type sortableSliceOfGeneric[T cmp.Ordered] []T
++type sortableSliceOfGeneric[T ordered] []T
+ 
+ func (g sortableSliceOfGeneric[T]) Len() int           { return len(g) }
+ func (g sortableSliceOfGeneric[T]) Less(i, j int) bool { return less[T](g[i], g[j]) }
+@@ -204,7 +203,7 @@ func (g sortableSliceOfGeneric[T]) Swap(i, j int)      { g[i], g[j] = g[j], g[i]
+ //
+ // This is a separate function and not a method because not all types supported
+ // by Generic are ordered and only those can be sorted.
+-func List[T cmp.Ordered](s Set[T]) []T {
++func List[T ordered](s Set[T]) []T {
+ 	res := make(sortableSliceOfGeneric[T], 0, len(s))
+ 	for key := range s {
+ 		res = append(res, key)
+@@ -237,6 +236,6 @@ func (s Set[T]) Len() int {
+ 	return len(s)
+ }
+ 
+-func less[T cmp.Ordered](lhs, rhs T) bool {
++func less[T ordered](lhs, rhs T) bool {
+ 	return lhs < rhs
+ }
+-- 
+2.43.0
+
