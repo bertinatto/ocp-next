@@ -1,0 +1,32 @@
+From 452c6552a012fcfdea60ae64f3308fa35a14a23e Mon Sep 17 00:00:00 2001
+From: Joel Speed <joel.speed@hotmail.co.uk>
+Date: Mon, 18 Dec 2023 14:24:18 +0000
+Subject: [PATCH] UPSTREAM: <carry>: Backport IP and CIDR CEL base for 1.28
+
+This commit needs to be carried until we rebase onto Kube 1.31.
+
+We have backported the library changes to 1.28, which means they can then be used in 1.29.
+
+Upstream, they were only introduced in 1.30 which means they wouldn't be usable until 1.31.
+
+This allows us to improve our API validation from OpenShift 4.16 onwards, instead of OpenShift 4.18 onwards.
+---
+ staging/src/k8s.io/apiserver/pkg/cel/environment/base.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/cel/environment/base.go b/staging/src/k8s.io/apiserver/pkg/cel/environment/base.go
+index c108bdd644f..a78075f885f 100644
+--- a/staging/src/k8s.io/apiserver/pkg/cel/environment/base.go
++++ b/staging/src/k8s.io/apiserver/pkg/cel/environment/base.go
+@@ -124,7 +124,7 @@ var baseOpts = []VersionedOptions{
+ 		},
+ 	},
+ 	{
+-		IntroducedVersion: version.MajorMinor(1, 30),
++		IntroducedVersion: version.MajorMinor(1, 28),
+ 		EnvOptions: []cel.EnvOption{
+ 			library.IP(),
+ 			library.CIDR(),
+-- 
+2.43.2
+

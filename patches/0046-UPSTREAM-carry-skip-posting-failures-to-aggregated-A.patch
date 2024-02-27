@@ -1,4 +1,4 @@
-From e7c1141b5fa91f9558a2fea626dab289c86fceec Mon Sep 17 00:00:00 2001
+From 515d094c847a5ced04348b98a418668baf5ed83d Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Tue, 24 Aug 2021 15:13:04 +0200
 Subject: [PATCH] UPSTREAM: <carry>: skip posting failures to aggregated APIs
@@ -27,11 +27,11 @@ OpenShift-Rebase-Source: 8558e889333
  4 files changed, 35 insertions(+), 1 deletion(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index df23e48cd63..80ee610e183 100644
+index e45b4955fa0..360bca42e9e 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -680,6 +680,11 @@ func (c *Config) DrainedNotify() <-chan struct{} {
- 	return c.lifecycleSignals.InFlightRequestsDrained.Signaled()
+@@ -685,6 +685,11 @@ func (c *Config) ShutdownInitiatedNotify() <-chan struct{} {
+ 	return c.lifecycleSignals.ShutdownInitiated.Signaled()
  }
  
 +// HasBeenReadySignal exposes a server's lifecycle signal which is signaled when the readyz endpoint succeeds for the first time.

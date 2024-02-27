@@ -1,0 +1,28 @@
+From 48b30a1d06a0e7c0b803bc4a889fb2cd02469f17 Mon Sep 17 00:00:00 2001
+From: Maciej Szulik <maszulik@redhat.com>
+Date: Fri, 9 Feb 2024 18:03:24 +0100
+Subject: [PATCH] UPSTREAM: <carry>: Revert: e2e-framework: don't autosync
+ PodSecurity labels
+
+This reverts commit da2d3908d124b410c9d9153eacd30242a7f91756.
+---
+ test/e2e/framework/framework.go | 3 ---
+ 1 file changed, 3 deletions(-)
+
+diff --git a/test/e2e/framework/framework.go b/test/e2e/framework/framework.go
+index a10d22b4907..954becb63f3 100644
+--- a/test/e2e/framework/framework.go
++++ b/test/e2e/framework/framework.go
+@@ -460,9 +460,6 @@ func (f *Framework) CreateNamespace(ctx context.Context, baseName string, labels
+ 	labels[admissionapi.EnforceLevelLabel] = firstNonEmptyPSaLevelOrRestricted(f.NamespacePodSecurityEnforceLevel, f.NamespacePodSecurityLevel)
+ 	labels[admissionapi.WarnLevelLabel] = firstNonEmptyPSaLevelOrRestricted(f.NamespacePodSecurityWarnLevel, f.NamespacePodSecurityLevel)
+ 	labels[admissionapi.AuditLevelLabel] = firstNonEmptyPSaLevelOrRestricted(f.NamespacePodSecurityAuditLevel, f.NamespacePodSecurityLevel)
+-	// turn off the OpenShift label syncer so that it does not attempt to sync
+-	// the PodSecurity admission labels
+-	labels["security.openshift.io/scc.podSecurityLabelSync"] = "false"
+ 
+ 	ns, err := createTestingNS(ctx, baseName, f.ClientSet, labels)
+ 	// check ns instead of err to see if it's nil as we may
+-- 
+2.43.2
+

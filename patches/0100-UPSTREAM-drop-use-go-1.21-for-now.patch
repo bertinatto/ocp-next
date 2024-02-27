@@ -1,0 +1,25 @@
+From bbcba2cfae31c7208424604e3bd73c73b9f96444 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 21 Feb 2024 15:05:00 -0300
+Subject: [PATCH] UPSTREAM: <drop>: use go 1.21 for now
+
+---
+ hack/lib/golang.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
+index 78244a92d82..6d8978c841a 100755
+--- a/hack/lib/golang.sh
++++ b/hack/lib/golang.sh
+@@ -467,7 +467,7 @@ EOF
+   local go_version
+   IFS=" " read -ra go_version <<< "$(GOFLAGS='' go version)"
+   local minimum_go_version
+-  minimum_go_version=go1.22
++  minimum_go_version=go1.21
+   if [[ "${minimum_go_version}" != $(echo -e "${minimum_go_version}\n${go_version[2]}" | sort -s -t. -k 1,1 -k 2,2n -k 3,3n | head -n1) && "${go_version[2]}" != "devel" ]]; then
+     kube::log::usage_from_stdin <<EOF
+ Detected go version: ${go_version[*]}.
+-- 
+2.43.0
+

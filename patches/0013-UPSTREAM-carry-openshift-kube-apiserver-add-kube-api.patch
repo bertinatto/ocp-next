@@ -1,4 +1,4 @@
-From 150731296a17df3fa9a14a1482955f0ec55cc1a8 Mon Sep 17 00:00:00 2001
+From a2f2fb4ca4294c4e99290b387c4e6ae64d5d0487 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -217,7 +217,7 @@ UPSTREAM: <carry>: openshift-kube-apiserver: add kube-apiserver patches
  cmd/kube-apiserver/app/options/options.go     |   6 ++
  cmd/kube-apiserver/app/server.go              |  42 +++++++++++
  pkg/controlplane/apiserver/config.go          |   4 ++
- pkg/kubeapiserver/authorizer/config.go        |  21 ++++--
+ pkg/kubeapiserver/authorizer/config.go        |   1 +
  pkg/kubeapiserver/authorizer/modes/patch.go   |   8 +++
  pkg/kubeapiserver/authorizer/patch.go         |   8 +++
  .../rbac/bootstrappolicy/controller_policy.go |   2 +
@@ -225,7 +225,7 @@ UPSTREAM: <carry>: openshift-kube-apiserver: add kube-apiserver patches
  .../authorizer/rbac/bootstrappolicy/policy.go |   6 +-
  .../testdata/controller-roles.yaml            |  12 ++++
  .../go-runner/testdata/tartest/out.tar.gz     | Bin 0 -> 174 bytes
- 11 files changed, 167 insertions(+), 7 deletions(-)
+ 11 files changed, 151 insertions(+), 3 deletions(-)
  create mode 100644 pkg/kubeapiserver/authorizer/modes/patch.go
  create mode 100644 pkg/kubeapiserver/authorizer/patch.go
  create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
@@ -322,10 +322,10 @@ index f8eefb7c7dd..460b93afc13 100644
  		genericConfig,
  		versionedInformers,
 diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index 07a3260f1f5..1be2b1c4adf 100644
+index 35ec3db5936..77c1663f6e4 100644
 --- a/pkg/controlplane/apiserver/config.go
 +++ b/pkg/controlplane/apiserver/config.go
-@@ -51,6 +51,8 @@ import (
+@@ -53,6 +53,8 @@ import (
  	"k8s.io/kubernetes/pkg/kubeapiserver"
  	"k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes"
  	rbacrest "k8s.io/kubernetes/pkg/registry/rbac/rest"
@@ -334,7 +334,7 @@ index 07a3260f1f5..1be2b1c4adf 100644
  )
  
  // BuildGenericConfig takes the master server options and produces the genericapiserver.Config associated with it
-@@ -85,6 +87,8 @@ func BuildGenericConfig(
+@@ -87,6 +89,8 @@ func BuildGenericConfig(
  	// on a fast local network
  	genericConfig.LoopbackClientConfig.DisableCompression = true
  
@@ -344,52 +344,17 @@ index 07a3260f1f5..1be2b1c4adf 100644
  	clientgoExternalClient, err := clientgoclientset.NewForConfig(kubeClientConfig)
  	if err != nil {
 diff --git a/pkg/kubeapiserver/authorizer/config.go b/pkg/kubeapiserver/authorizer/config.go
-index b2bc689e420..d075793f98d 100644
+index 06bc0b9d373..1c7d9d13ab3 100644
 --- a/pkg/kubeapiserver/authorizer/config.go
 +++ b/pkg/kubeapiserver/authorizer/config.go
-@@ -20,6 +20,9 @@ import (
- 	"errors"
- 	"fmt"
+@@ -24,6 +24,7 @@ import (
+ 	"time"
  
-+	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/browsersafe"
-+	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/scopeauthorizer"
+ 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 +
  	utilnet "k8s.io/apimachinery/pkg/util/net"
+ 	"k8s.io/apimachinery/pkg/util/sets"
  	"k8s.io/apimachinery/pkg/util/wait"
- 	authzconfig "k8s.io/apiserver/pkg/apis/apiserver"
-@@ -74,9 +77,11 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
- 		ruleResolvers []authorizer.RuleResolver
- 	)
- 
--	// Add SystemPrivilegedGroup as an authorizing group
--	superuserAuthorizer := authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup)
--	authorizers = append(authorizers, superuserAuthorizer)
-+	if !skipSystemMastersAuthorizer {
-+		// Add SystemPrivilegedGroup as an authorizing group
-+		superuserAuthorizer := authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup)
-+		authorizers = append(authorizers, superuserAuthorizer)
-+	}
- 
- 	for _, configuredAuthorizer := range config.AuthorizationConfiguration.Authorizers {
- 		// Keep cases in sync with constant list in k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes/modes.go.
-@@ -147,8 +152,16 @@ func (config Config) New() (authorizer.Authorizer, authorizer.RuleResolver, erro
- 				&rbac.ClusterRoleGetter{Lister: config.VersionedInformerFactory.Rbac().V1().ClusterRoles().Lister()},
- 				&rbac.ClusterRoleBindingLister{Lister: config.VersionedInformerFactory.Rbac().V1().ClusterRoleBindings().Lister()},
- 			)
--			authorizers = append(authorizers, rbacAuthorizer)
-+			// Wrap with an authorizer that detects unsafe requests and modifies verbs/resources appropriately so policy can address them separately
-+			authorizers = append(authorizers, browsersafe.NewBrowserSafeAuthorizer(rbacAuthorizer, user.AllAuthenticated))
- 			ruleResolvers = append(ruleResolvers, rbacAuthorizer)
-+		case authzconfig.AuthorizerType(modes.ModeScope):
-+			// Wrap with an authorizer that detects unsafe requests and modifies verbs/resources appropriately so policy can address them separately
-+			scopeLimitedAuthorizer := scopeauthorizer.NewAuthorizer(config.VersionedInformerFactory.Rbac().V1().ClusterRoles().Lister())
-+			authorizers = append(authorizers, browsersafe.NewBrowserSafeAuthorizer(scopeLimitedAuthorizer, user.AllAuthenticated))
-+		case authzconfig.AuthorizerType(modes.ModeSystemMasters):
-+			// no browsersafeauthorizer here becase that rewrites the resources.  This authorizer matches no matter which resource matches.
-+			authorizers = append(authorizers, authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup))
- 		default:
- 			return nil, nil, fmt.Errorf("unknown authorization mode %s specified", configuredAuthorizer.Type)
- 		}
 diff --git a/pkg/kubeapiserver/authorizer/modes/patch.go b/pkg/kubeapiserver/authorizer/modes/patch.go
 new file mode 100644
 index 00000000000..bc892601ebe
@@ -419,7 +384,7 @@ index 00000000000..8a095efcf98
 +	skipSystemMastersAuthorizer = true
 +}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-index a31d1f95a50..2a37f7ad302 100644
+index f6219bf3ad6..8893cb8c4d7 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 @@ -162,6 +162,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
@@ -510,7 +475,7 @@ index 00000000000..8f91d44c9c8
 +	return bindings
 +}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index 2e0dbdbaddf..c438cb04048 100644
+index e9eb1f84c1f..81bc9c5a4a9 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 @@ -189,8 +189,8 @@ func NodeRules() []rbacv1.PolicyRule {
@@ -524,7 +489,7 @@ index 2e0dbdbaddf..c438cb04048 100644
  	roles := []rbacv1.ClusterRole{
  		{
  			// a "root" role which can do absolutely anything
-@@ -601,7 +601,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
+@@ -605,7 +605,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
  const systemNodeRoleName = "system:node"
  
  // ClusterRoleBindings return default rolebindings to the default roles
@@ -534,7 +499,7 @@ index 2e0dbdbaddf..c438cb04048 100644
  		rbacv1helpers.NewClusterBinding("cluster-admin").Groups(user.SystemPrivilegedGroup).BindingOrDie(),
  		rbacv1helpers.NewClusterBinding("system:monitoring").Groups(user.MonitoringGroup).BindingOrDie(),
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
-index 940519aa083..32958a3ef96 100644
+index ea2295ccfe2..50d46c3df42 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 @@ -517,6 +517,12 @@ items:

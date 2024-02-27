@@ -1,0 +1,156 @@
+From 16e6c32a2a01d7bfd05628c07b52dac3f0eb66ef Mon Sep 17 00:00:00 2001
+From: ehila <ehila@redhat.com>
+Date: Thu, 7 Dec 2023 13:34:50 -0500
+Subject: [PATCH] UPSTREAM: <carry>: Update management webhook pod admission
+ logic
+
+Updating the logic for pod admission to allow a pod creation with workload partitioning annotations to be run in a namespace that has no workload allow annoations.
+
+The pod will be stripped of its workload annotations and treated as if it were normal, a warning annoation will be placed to note the behavior on the pod.
+
+Signed-off-by: ehila <ehila@redhat.com>
+---
+ .../managementcpusoverride/admission.go       | 12 +++-
+ .../managementcpusoverride/admission_test.go  | 62 +++++++++++++------
+ 2 files changed, 54 insertions(+), 20 deletions(-)
+
+diff --git a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+index 67430547422..c0a0ce074b5 100644
+--- a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
++++ b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+@@ -217,6 +217,13 @@ func (a *managementCPUsOverride) Admit(ctx context.Context, attr admission.Attri
+ 		return err
+ 	}
+ 
++	if _, found := ns.Annotations[namespaceAllowedAnnotation]; !found && len(workloadType) > 0 {
++		pod.Annotations[workloadAdmissionWarning] = fmt.Sprintf(
++			"skipping pod CPUs requests modifications because the %s namespace is not annotated with %s to allow workload partitioning",
++			ns.GetName(), namespaceAllowedAnnotation)
++		return nil
++	}
++
+ 	if !doesNamespaceAllowWorkloadType(ns.Annotations, workloadType) {
+ 		return admission.NewForbidden(attr, fmt.Errorf("%s the pod namespace %q does not allow the workload type %s", PluginName, ns.Name, workloadType))
+ 	}
+@@ -449,10 +456,13 @@ func podHasBothCPULimitAndRequest(containers []coreapi.Container) bool {
+ 	return false
+ }
+ 
++// doesNamespaceAllowWorkloadType will return false when a workload type does not match any present ones.
+ func doesNamespaceAllowWorkloadType(annotations map[string]string, workloadType string) bool {
+ 	v, found := annotations[namespaceAllowedAnnotation]
++	// When a namespace contains no annotation for workloads we infer that to mean all workload types are allowed.
++	// The mutation hook will strip all workload annotation from pods that contain them in that circumstance.
+ 	if !found {
+-		return false
++		return true
+ 	}
+ 
+ 	for _, t := range strings.Split(v, ",") {
+diff --git a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
+index 114a5ad3865..59663b487a5 100644
+--- a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
++++ b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
+@@ -84,12 +84,12 @@ func TestAdmit(t *testing.T) {
+ 	}{
+ 		{
+ 			name:               "should return admission error when the pod namespace does not allow the workload type",
+-			pod:                testManagedPod("500m", "250m", "500Mi", "250Mi"),
++			pod:                testManagedPodWithWorkloadAnnotation("500m", "250m", "500Mi", "250Mi", "non-existent"),
+ 			expectedCpuRequest: resource.MustParse("250m"),
+-			namespace:          testNamespace(),
++			namespace:          testManagedNamespace(),
+ 			nodes:              []*corev1.Node{testNodeWithManagementResource()},
+ 			infra:              testClusterSNOInfra(),
+-			expectedError:      fmt.Errorf("the pod namespace %q does not allow the workload type management", "namespace"),
++			expectedError:      fmt.Errorf("the pod namespace %q does not allow the workload type non-existent", "managed-namespace"),
+ 		},
+ 		{
+ 			name:               "should ignore pods that do not have managed annotation",
+@@ -167,6 +167,25 @@ func TestAdmit(t *testing.T) {
+ 			expectedError:      fmt.Errorf(`failed to get workload annotation effect: the workload annotation value map["test":"test"] does not have "effect" key`),
+ 			infra:              testClusterSNOInfra(),
+ 		},
++		{
++			name: "should return admission warning when the pod has workload annotation but the namespace does not",
++			pod: testManagedPodWithAnnotations(
++				"500m",
++				"250m",
++				"500Mi",
++				"250Mi",
++				map[string]string{
++					fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement): `{"test": "test"}`,
++				},
++			),
++			expectedCpuRequest: resource.MustParse("250m"),
++			expectedAnnotations: map[string]string{
++				workloadAdmissionWarning: "skipping pod CPUs requests modifications because the namespace namespace is not annotated with workload.openshift.io/allowed to allow workload partitioning",
++			},
++			namespace: testNamespace(),
++			nodes:     []*corev1.Node{testNodeWithManagementResource()},
++			infra:     testClusterSNOInfra(),
++		},
+ 		{
+ 			name:               "should delete CPU requests and update workload CPU annotations for the burstable pod with managed annotation",
+ 			pod:                testManagedPod("", "250m", "500Mi", "250Mi"),
+@@ -437,16 +456,28 @@ func TestValidate(t *testing.T) {
+ 			expectedError: fmt.Errorf("the pod without workload annotations can not have containers with workload resources %q", "management.workload.openshift.io/cores"),
+ 		},
+ 		{
+-			name: "should return invalid error when the pod has workload annotation, but the pod namespace does not have allowed annotation",
+-			pod: testManagedPod(
++			name: "should return invalid error when the pod has workload annotation, but the pod namespace does not have allowed workload type",
++			pod: testManagedPodWithWorkloadAnnotation(
+ 				"500m",
+ 				"250m",
+ 				"500Mi",
+ 				"250Mi",
++				"non-existent",
+ 			),
+-			namespace:     testNamespace(),
++			namespace:     testManagedNamespace(),
+ 			nodes:         []*corev1.Node{testNodeWithManagementResource()},
+-			expectedError: fmt.Errorf("the pod can not have workload annotation, when the namespace %q does not allow it", "namespace"),
++			expectedError: fmt.Errorf("the pod can not have workload annotation, when the namespace %q does not allow it", "managed-namespace"),
++		},
++		{
++			name: "should not return any errors when the pod has workload annotation, but the pod namespace has no annotations",
++			pod: testManagedPod(
++				"500m",
++				"250m",
++				"500Mi",
++				"250Mi",
++			),
++			namespace: testNamespace(),
++			nodes:     []*corev1.Node{testNodeWithManagementResource()},
+ 		},
+ 		{
+ 			name: "should not return any errors when the pod and namespace valid",
+@@ -532,19 +563,12 @@ func testManagedStaticPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest strin
+ }
+ 
+ func testManagedPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest string) *kapi.Pod {
+-	pod := testPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest)
+-
+-	pod.Annotations = map[string]string{}
+-	for _, c := range pod.Spec.InitContainers {
+-		cpusetAnnotation := fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, c.Name)
+-		pod.Annotations[cpusetAnnotation] = `{"cpuset": "0-1"}`
+-	}
+-	for _, c := range pod.Spec.Containers {
+-		cpusetAnnotation := fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, c.Name)
+-		pod.Annotations[cpusetAnnotation] = `{"cpuset": "0-1"}`
+-	}
++	return testManagedPodWithWorkloadAnnotation(cpuLimit, cpuRequest, memoryLimit, memoryRequest, workloadTypeManagement)
++}
+ 
+-	managementWorkloadAnnotation := fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement)
++func testManagedPodWithWorkloadAnnotation(cpuLimit, cpuRequest, memoryLimit, memoryRequest string, workloadType string) *kapi.Pod {
++	pod := testPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest)
++	managementWorkloadAnnotation := fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadType)
+ 	pod.Annotations = map[string]string{
+ 		managementWorkloadAnnotation: fmt.Sprintf(`{"%s":"%s"}`, podWorkloadAnnotationEffect, workloadEffectPreferredDuringScheduling),
+ 	}
+-- 
+2.43.2
+

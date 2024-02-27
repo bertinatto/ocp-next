@@ -1,0 +1,25 @@
+From b2ed974b6e9a294f91fbfbd7085595a49682ade2 Mon Sep 17 00:00:00 2001
+From: Maciej Szulik <maszulik@redhat.com>
+Date: Thu, 11 Jan 2024 17:44:04 +0100
+Subject: [PATCH] UPSTREAM: <carry>: update test rules
+
+---
+ openshift-hack/e2e/annotate/rules.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index 21c26f0f96a..cf4e72c974e 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -234,7 +234,7 @@ var (
+ 			`\[sig-api-machinery\] AdmissionWebhook should be able to deny pod and configmap creation`,
+ 
+ 			// https://bugzilla.redhat.com/show_bug.cgi?id=1745720
+-			`\[sig-storage\] CSI Volumes \[Driver: pd.csi.storage.gke.io\]\[Serial\]`,
++			`\[sig-storage\] CSI Volumes \[Driver: pd.csi.storage.gke.io\]`,
+ 
+ 			// https://bugzilla.redhat.com/show_bug.cgi?id=1749882
+ 			`\[sig-storage\] CSI Volumes CSI Topology test using GCE PD driver \[Serial\]`,
+-- 
+2.43.2
+

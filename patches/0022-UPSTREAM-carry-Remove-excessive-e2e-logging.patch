@@ -1,4 +1,4 @@
-From b8dd14ed67fdb898fc4d8c6287ec73d2c3065b48 Mon Sep 17 00:00:00 2001
+From e8dd47f6439370e98f4378ebaf35c00f88c9b06d Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:59 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Remove excessive e2e logging
@@ -21,23 +21,25 @@ Jan 12 20:49:28.727: INFO: Poke("http://a74e3476115ce4d2d817a1e5ea608dad-8029178
 
 OpenShift-Rebase-Source: 8e732985579
 ---
- .../e2e/framework/internal/unittests/cleanup/cleanup_test.go | 1 -
+ .../e2e/framework/internal/unittests/cleanup/cleanup_test.go | 2 --
  test/e2e/framework/network/utils.go                          | 5 ++---
  test/e2e/framework/util.go                                   | 4 ++--
- 3 files changed, 4 insertions(+), 6 deletions(-)
+ 3 files changed, 4 insertions(+), 7 deletions(-)
 
 diff --git a/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go b/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
-index d86bdcc3bee..6896cf911b6 100644
+index a0a2059b6bb..8b017d987dd 100644
 --- a/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
 +++ b/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
-@@ -113,7 +113,6 @@ INFO: before
+@@ -120,9 +120,7 @@ const (
  < Exit [BeforeEach] e2e - cleanup_test.go:63 <time>
  > Enter [BeforeEach] e2e - set up framework | framework.go:xxx <time>
  STEP: Creating a kubernetes client - framework.go:xxx <time>
--INFO: >>> kubeConfig: yyy/kube.config
+-<klog> util.go:xxx] >>> kubeConfig: yyy/kube.config
  STEP: Building a namespace api object, basename test-namespace - framework.go:xxx <time>
- INFO: Skipping waiting for service account
+-<klog> framework.go:xxx] Skipping waiting for service account
  < Exit [BeforeEach] e2e - set up framework | framework.go:xxx <time>
+ > Enter [BeforeEach] e2e - cleanup_test.go:56 <time>
+ <klog> cleanup_test.go:56] extension before
 diff --git a/test/e2e/framework/network/utils.go b/test/e2e/framework/network/utils.go
 index 99f53d53a14..5319544734a 100644
 --- a/test/e2e/framework/network/utils.go

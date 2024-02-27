@@ -1,4 +1,4 @@
-From 221bb42db864eab13fe72dfc63bf751169c535bb Mon Sep 17 00:00:00 2001
+From 8514adf887ffa77ded434a15192f024a21ea81d9 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -512,7 +512,6 @@ UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
  hack/update-kubensenter.sh                    |   1 +
  hack/update-test-annotations.sh               |   1 +
  hack/update-vendor.sh                         |   9 +-
- hack/verify-govet-levee.sh                    |   6 +-
  hack/verify-kubensenter.sh                    |   1 +
  hack/verify-pkg-names.sh                      |   2 +-
  hack/verify-test-annotations.sh               |   1 +
@@ -574,7 +573,7 @@ UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
  openshift.spec                                | 137 ++++
  pkg/kubelet/DOWNSTREAM_OWNERS                 |  17 +
  test/typecheck/main.go                        |   3 +
- 79 files changed, 7033 insertions(+), 56 deletions(-)
+ 78 files changed, 7030 insertions(+), 53 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 DOWNSTREAM_OWNERS
  create mode 100644 README.openshift.md
@@ -1742,7 +1741,7 @@ index 00000000000..aa3aa880085
 +	}, nil
 +}
 diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
-index f3466ff76bd..b353bbc06f2 100755
+index c2bb930344b..6d8978c841a 100755
 --- a/hack/lib/golang.sh
 +++ b/hack/lib/golang.sh
 @@ -80,6 +80,8 @@ kube::golang::server_targets() {
@@ -1961,28 +1960,6 @@ index 03fcb3255b5..2345930fa42 100755
  
  options:
    # make root approval non-recursive
-diff --git a/hack/verify-govet-levee.sh b/hack/verify-govet-levee.sh
-index f087d59d1b9..e2fff073370 100755
---- a/hack/verify-govet-levee.sh
-+++ b/hack/verify-govet-levee.sh
-@@ -32,7 +32,7 @@ PATH="${GOBIN}:${PATH}"
- 
- # Install levee
- pushd "${KUBE_ROOT}/hack/tools" >/dev/null
--  GO111MODULE=on go install github.com/google/go-flow-levee/cmd/levee
-+  GO111MODULE=on go install -mod=readonly github.com/google/go-flow-levee/cmd/levee
- popd >/dev/null
- 
- # Prefer full path for interaction with make vet
-@@ -43,6 +43,6 @@ CONFIG_FILE="${KUBE_ROOT}/hack/testdata/levee/levee-config.yaml"
- targets=()
- while IFS='' read -r line; do
-   targets+=("${line}")
--done < <(go list --find -e ./... | grep -E -v "/(build|third_party|vendor|staging|clientset_generated|hack)/")
-+done < <(GO111MODULE=on go list --find -e ./... | grep -E -v "/(build|third_party|vendor|staging|clientset_generated|hack)/")
- 
--go vet -vettool="${LEVEE_BIN}" -config="${CONFIG_FILE}" "${targets[@]}"
-+GO111MODULE=on go vet -vettool="${LEVEE_BIN}" -config="${CONFIG_FILE}" "${targets[@]}"
 diff --git a/hack/verify-kubensenter.sh b/hack/verify-kubensenter.sh
 new file mode 120000
 index 00000000000..01e1608f153
@@ -2013,15 +1990,15 @@ index 00000000000..a9cbed2d324
 +../openshift-hack/verify-test-annotations.sh
 \ No newline at end of file
 diff --git a/hack/verify-typecheck-providerless.sh b/hack/verify-typecheck-providerless.sh
-index 56c5de10a6b..2e49ea717b5 100755
+index 55ee5ff1bcf..0f4f3e60483 100755
 --- a/hack/verify-typecheck-providerless.sh
 +++ b/hack/verify-typecheck-providerless.sh
 @@ -26,7 +26,7 @@ KUBE_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
  cd "${KUBE_ROOT}"
  # verify the providerless build
  # https://github.com/kubernetes/enhancements/blob/master/keps/sig-cloud-provider/1179-building-without-in-tree-providers/README.md
--hack/verify-typecheck.sh --skip-test --tags=providerless --ignore-dirs=test/e2e
-+# hack/verify-typecheck.sh --skip-test --tags=providerless --ignore-dirs=test/e2e
+-hack/verify-typecheck.sh --skip-test --tags=providerless
++# hack/verify-typecheck.sh --skip-test --tags=providerless
  
  # verify using go list
  if _out="$(go list -mod=readonly -tags "providerless" -e -json  k8s.io/kubernetes/cmd/kubelet/... \

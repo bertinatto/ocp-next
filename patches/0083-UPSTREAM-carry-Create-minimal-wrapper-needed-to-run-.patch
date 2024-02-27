@@ -1,0 +1,35 @@
+From 028d41ce929019c914a6743cdbca0c274f31d104 Mon Sep 17 00:00:00 2001
+From: Maciej Szulik <maszulik@redhat.com>
+Date: Fri, 9 Feb 2024 18:03:01 +0100
+Subject: [PATCH] UPSTREAM: <carry>: Create minimal wrapper needed to run k8s
+ e2e tests
+
+---
+ openshift-hack/e2e/namespace.go | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/openshift-hack/e2e/namespace.go b/openshift-hack/e2e/namespace.go
+index d82fabb56d3..f52ef332fe9 100644
+--- a/openshift-hack/e2e/namespace.go
++++ b/openshift-hack/e2e/namespace.go
+@@ -28,10 +28,14 @@ func CreateTestingNS(ctx context.Context, baseName string, c kclientset.Interfac
+ 		baseName = "e2e-" + baseName
+ 	}
+ 
++	if labels == nil {
++		labels = map[string]string{}
++	}
++	// turn off the OpenShift label syncer so that it does not attempt to sync
++	// the PodSecurity admission labels
++	labels["security.openshift.io/scc.podSecurityLabelSync"] = "false"
++
+ 	if isKubeNamespace {
+-		if labels == nil {
+-			labels = map[string]string{}
+-		}
+ 		labels["security.openshift.io/disable-securitycontextconstraints"] = "true"
+ 	}
+ 
+-- 
+2.43.2
+
