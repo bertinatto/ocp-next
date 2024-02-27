@@ -28,7 +28,7 @@ func updateDependencies(workTree string) error {
 			"--env", "GOPROXY=direct",
 			"--env", "OS_RUN_WITHOUT_DOCKER=yes",
 			"--env", "FORCE_HOST_GO=1",
-			"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.20-openshift-4.16",
+			"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.21-openshift-4.16",
 			"hack/pin-dependency.sh",
 			dep,
 			version,
@@ -56,7 +56,7 @@ func updateVendor(workTree string) error {
 		// "--env", "GOPROXY=direct",
 		"--env", "OS_RUN_WITHOUT_DOCKER=yes",
 		"--env", "FORCE_HOST_GO=1",
-		"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.20-openshift-4.16",
+		"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.21-openshift-4.16",
 		"hack/update-vendor.sh")
 	cmd.Dir = workTree
 	cmd.Stdin = os.Stdin
@@ -80,7 +80,7 @@ func updateGenerated(workTree string) error {
 		// 	"--workdir=/go/k8s.io/kubernetes",
 		// 	"--env", "OS_RUN_WITHOUT_DOCKER=yes",
 		// 	"--env", "FORCE_HOST_GO=1",
-		// 	"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.20-openshift-4.16",
+		// 	"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.21-openshift-4.16",
 		// 	"hack/install-etcd.sh"),
 		exec.Command("podman",
 			"run",
@@ -92,7 +92,7 @@ func updateGenerated(workTree string) error {
 			"--env", "OS_RUN_WITHOUT_DOCKER=yes",
 			"--env", "FORCE_HOST_GO=1",
 			"--env", "PATH=/opt/google/protobuf/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/go/bin:/go/k8s.io/kubernetes/third_party/etcd:/go/k8s.io/kubernetes/third_party/protoc",
-			"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.20-openshift-4.16",
+			"registry.ci.openshift.org/openshift/release:rhel-9-release-golang-1.21-openshift-4.16",
 			"make", "update"),
 	}
 	for _, cmd := range cmds {
