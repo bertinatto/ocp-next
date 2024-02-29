@@ -1,0 +1,126 @@
+From f9357dd4c2d6dc791fab33878f425487a4694736 Mon Sep 17 00:00:00 2001
+From: Scott Dodson <sdodson@redhat.com>
+Date: Tue, 13 Feb 2024 14:32:59 -0500
+Subject: [PATCH] UPSTREAM: <carry>: RPM: Split apiserver, scheduler, k-c-m,
+ kubelet into subpackages
+
+This change should allow us to install a much smaller set of binaries
+into RHCOS while preserving functional compatibility with with anyone
+who installs `openshift-hyperkube` today as it requires all sub packages.
+Those wishing to have just the kubelet can begin installing
+`openshift-hyperkube-kubelet`
+
+-rwxr-xr-x. 2 root root 129M Jan  1  1970 /usr/bin/kube-apiserver
+-rwxr-xr-x. 2 root root 114M Jan  1  1970 /usr/bin/kube-controller-manager
+-rwxr-xr-x. 2 root root  54M Jan  1  1970 /usr/bin/kube-scheduler
+-rwxr-xr-x. 2 root root 105M Jan  1  1970 /usr/bin/kubelet
+-rwxr-xr-x. 2 root root 3.5K Jan  1  1970 /usr/bin/kubensenter
+
+Should save about 297M or 74% in most environments where the kubelet is
+all that's desired.
+
+It's not clear to me why these were ever in the RPM since OCP 4.x but this
+packaging should remain compatible as openshift-hyperkube depends on
+ - openshift-kubelet
+ - openshift-kube-apiserver
+ - openshift-kube-scheduler
+ - openshift-kube-controller-manager
+---
+ openshift.spec | 59 +++++++++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 51 insertions(+), 8 deletions(-)
+
+diff --git a/openshift.spec b/openshift.spec
+index 35d1ecb6320..622f809dc9c 100644
+--- a/openshift.spec
++++ b/openshift.spec
+@@ -69,17 +69,49 @@ Kubernetes allowing you to safely host many different applications and workloads
+ on a unified cluster.
+ 
+ %package hyperkube
+-Summary:        OpenShift Kubernetes server commands
+-Requires:       util-linux
+-Requires:       socat
+-Requires:       iptables
++Summary:        OpenShift Kubernetes server commands, via deps
++Requires:       kube-scheduler = %{version}
++Requires:       kube-kubelet = %{version}
++Requires:       kube-controller-manager = %{version}
++Requires:       kube-apiserver = %{version}
+ Provides:       hyperkube = %{version}
+ Obsoletes:      atomic-openshift-hyperkube <= %{version}
+ Obsoletes:      atomic-openshift-node <= %{version}
+ 
++%package kube-scheduler
++Summary:        OpenShift Kubernetes Scheduler
++Provides:       kube-scheduler = %{version}
++
++%package kubelet
++Summary:        OpenShift Kubernetes Kubelet
++Requires:       util-linux
++Requires:       socat
++Requires:       iptables
++Provides:       kube-kubelet = %{version}
++
++%package kube-controller-manager
++Summary:        OpenShift Kubernetes Controller Manager
++Provides:       kube-controller-manager = %{version}
++
++%package kube-apiserver
++Summary:        OpenShift Kubernetes API Server
++Provides:       kube-apiserver = %{version}
++
+ %description hyperkube
+ %{summary}
+ 
++%description kube-scheduler
++%{summary}
++
++%description kubelet
++%{summary}
++
++%description kube-controller-manager
++%{summary}
++
++%description kube-apiserver
++%{summary}
++
+ %prep
+ %if 0%{do_prep}
+ %setup -q
+@@ -120,18 +152,29 @@ install -p -m 755 openshift-hack/images/hyperkube/hyperkube %{buildroot}%{_bindi
+ install -p -m 755 openshift-hack/images/hyperkube/kubensenter %{buildroot}%{_bindir}/kubensenter
+ install -p -m 755 openshift-hack/sysctls/50-kubelet.conf %{buildroot}%{_sysctldir}/50-kubelet.conf
+ 
+-%post
++%post kubelet
+ %sysctl_apply 50-kubelet.conf
+ 
+ %files hyperkube
+ %license LICENSE
+ %{_bindir}/hyperkube
+-%{_bindir}/kube-apiserver
+-%{_bindir}/kube-controller-manager
+-%{_bindir}/kube-scheduler
++%defattr(-,root,root,0700)
++
++%files kubelet
+ %{_bindir}/kubelet
+ %{_bindir}/kubensenter
+ %{_sysctldir}/50-kubelet.conf
+ %defattr(-,root,root,0700)
+ 
++%files kube-scheduler
++%{_bindir}/kube-scheduler
++
++%files kube-controller-manager
++%{_bindir}/kube-controller-manager
++
++%files kube-apiserver
++%{_bindir}/kube-apiserver
++
++
++
+ %changelog
+-- 
+2.43.2
+
