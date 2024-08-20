@@ -1,0 +1,2809 @@
+From 8de20d9514987dae7c715e56f9fa26e705a1fac1 Mon Sep 17 00:00:00 2001
+From: Luis Sanchez <sanchezl@redhat.com>
+Date: Wed, 24 Feb 2021 09:20:30 -0500
+Subject: [PATCH] UPSTREAM: <carry>: APIRequestCount Handler
+
+OpenShift-Rebase-Source: 4d74b7761bc
+---
+ .../apiaccess_count_controller.go             |  217 +++
+ .../apiaccess_count_controller_test.go        | 1242 +++++++++++++++++
+ .../filters/apirequestcount/deprecated.go     |   70 +
+ .../filters/apirequestcount/request_counts.go |  442 ++++++
+ .../apirequestcount/request_counts_test.go    |  294 ++++
+ .../filters/apirequestcount/update_func.go    |  213 +++
+ .../apirequestcount/v1helpers/helpers.go      |   71 +
+ .../filters/apirequestcount_filter.go         |   40 +
+ .../openshiftkubeapiserver/patch.go           |   57 +-
+ .../patch_handlerchain.go                     |    8 +-
+ 10 files changed, 2638 insertions(+), 16 deletions(-)
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller_test.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/deprecated.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/request_counts.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/request_counts_test.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/update_func.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount/v1helpers/helpers.go
+ create mode 100644 openshift-kube-apiserver/filters/apirequestcount_filter.go
+
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller.go b/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller.go
+new file mode 100644
+index 00000000000..ad2f82b7374
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller.go
+@@ -0,0 +1,217 @@
++package apirequestcount
++
++import (
++	"context"
++	"fmt"
++	"math/rand"
++	"strings"
++	"sync"
++	"time"
++
++	apiv1 "github.com/openshift/api/apiserver/v1"
++	apiv1client "github.com/openshift/client-go/apiserver/clientset/versioned/typed/apiserver/v1"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/util/runtime"
++	"k8s.io/apimachinery/pkg/util/wait"
++	"k8s.io/klog/v2"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/customresourcevalidation/apirequestcount"
++	"k8s.io/kubernetes/openshift-kube-apiserver/filters/apirequestcount/v1helpers"
++)
++
++// NewController returns a controller
++func NewController(client apiv1client.APIRequestCountInterface, nodeName string) *controller {
++	ret := &controller{
++		client:       client,
++		nodeName:     nodeName,
++		updatePeriod: 5 * time.Minute,
++	}
++	ret.resetRequestCount()
++	return ret
++}
++
++// APIRequestLogger support logging API request counts.
++type APIRequestLogger interface {
++	IsDeprecated(resource, version, group string) bool
++	LogRequest(resource schema.GroupVersionResource, timestamp time.Time, user, userAgent, verb string)
++	Start(stop <-chan struct{})
++}
++
++type controller struct {
++	client       apiv1client.APIRequestCountInterface
++	nodeName     string
++	updatePeriod time.Duration
++	loadOnce     sync.Once
++
++	requestCountLock sync.RWMutex
++	requestCounts    *apiRequestCounts
++}
++
++// IsDeprecated return true if the resource is deprecated.
++func (c *controller) IsDeprecated(resource, version, group string) bool {
++	_, ok := deprecatedApiRemovedRelease[schema.GroupVersionResource{
++		Group:    group,
++		Version:  version,
++		Resource: resource,
++	}]
++	return ok
++}
++
++// LogRequest queues an api request for logging
++func (c *controller) LogRequest(resource schema.GroupVersionResource, timestamp time.Time, user, userAgent, verb string) {
++	c.requestCountLock.RLock()
++	defer c.requestCountLock.RUnlock()
++	// we snip user agents to reduce cardinality and unique keys.  For well-behaved agents, we see useragents about like
++	// kube-controller-manager/v1.21.0 (linux/amd64) kubernetes/743bd58/kube-controller-manager
++	// so we will snip at the first space.
++	snippedUserAgent := userAgent
++	if i := strings.Index(userAgent, " "); i > 0 {
++		snippedUserAgent = userAgent[:i]
++	}
++	userKey := userKey{
++		user:      user,
++		userAgent: snippedUserAgent,
++	}
++	c.requestCounts.IncrementRequestCount(resource, timestamp.Hour(), userKey, verb, 1)
++}
++
++// resetCount returns the current count and creates a new requestCount instance var
++func (c *controller) resetRequestCount() *apiRequestCounts {
++	c.requestCountLock.Lock()
++	defer c.requestCountLock.Unlock()
++	existing := c.requestCounts
++	c.requestCounts = newAPIRequestCounts(c.nodeName)
++	return existing
++}
++
++// Start the controller
++func (c *controller) Start(stop <-chan struct{}) {
++	klog.Infof("Starting APIRequestCount controller.")
++
++	// create a context.Context needed for some API calls
++	ctx, cancel := context.WithCancel(context.Background())
++	go func() {
++		<-stop
++		klog.Infof("Shutting down APIRequestCount controller.")
++		cancel()
++	}()
++
++	// write out logs every c.updatePeriod
++	go wait.NonSlidingUntilWithContext(ctx, c.sync, c.updatePeriod)
++}
++func (c *controller) sync(ctx context.Context) {
++	currentHour := time.Now().Hour()
++	c.persistRequestCountForAllResources(ctx, currentHour)
++}
++
++func (c *controller) persistRequestCountForAllResources(ctx context.Context, currentHour int) {
++	klog.V(4).Infof("updating top APIRequest counts")
++	defer klog.V(4).Infof("finished updating top APIRequest counts")
++
++	// get the current count to persist, start a new in-memory count
++	countsToPersist := c.resetRequestCount()
++
++	// remove stale data
++	expiredHour := (currentHour + 1) % 24
++	countsToPersist.ExpireOldestCounts(expiredHour)
++
++	// when this function returns, add any remaining counts back to the total to be retried for update
++	defer c.requestCounts.Add(countsToPersist)
++
++	// Add resources that have an existing APIRequestCount so that the current and hourly logs
++	// continue to rotate even if the resource has not had a request since the last restart.
++	c.loadOnce.Do(func() {
++		// As resources are never fully removed from countsToPersist, we only need to do this once.
++		// After the request counts have been persisted, the resources will be added "back" to the
++		// in memory counts (c.requestCounts, see defer statement above).
++		arcs, err := c.client.List(ctx, metav1.ListOptions{})
++		if err != nil {
++			runtime.HandleError(err) // oh well, we tried
++			return
++		}
++		for _, arc := range arcs.Items {
++			gvr, err := apirequestcount.NameToResource(arc.Name)
++			if err != nil {
++				runtime.HandleError(fmt.Errorf("invalid APIRequestCount %s (added manually) should be deleted: %v", arc.Name, err))
++				continue
++			}
++			countsToPersist.Resource(gvr)
++		}
++	})
++
++	var wg sync.WaitGroup
++	for gvr := range countsToPersist.resourceToRequestCount {
++		resourceCount := countsToPersist.Resource(gvr)
++		wg.Add(1)
++		go func() {
++			time.Sleep(time.Duration(rand.Int63n(int64(c.updatePeriod / 5 * 4)))) // smear out over the interval to avoid resource spikes
++			c.persistRequestCountForResource(ctx, &wg, currentHour, expiredHour, resourceCount)
++		}()
++	}
++	wg.Wait()
++}
++
++func (c *controller) persistRequestCountForResource(ctx context.Context, wg *sync.WaitGroup, currentHour, expiredHour int, localResourceCount *resourceRequestCounts) {
++	defer wg.Done()
++
++	klog.V(4).Infof("updating top %v APIRequest counts", localResourceCount.resource)
++	defer klog.V(4).Infof("finished updating top %v APIRequest counts", localResourceCount.resource)
++
++	status, _, err := v1helpers.ApplyStatus(
++		ctx,
++		c.client,
++		resourceToAPIName(localResourceCount.resource),
++		nodeStatusDefaulter(c.nodeName, currentHour, expiredHour, localResourceCount.resource),
++		SetRequestCountsForNode(c.nodeName, currentHour, expiredHour, localResourceCount),
++	)
++	if err != nil {
++		runtime.HandleError(err)
++		return
++	}
++
++	// on successful update, remove the counts we don't need.  This is every hour except the current hour
++	// and every user recorded for the current hour on this node
++	removePersistedRequestCounts(c.nodeName, currentHour, status, localResourceCount)
++}
++
++// removePersistedRequestCounts removes the counts we don't need to keep in memory.
++// This is every hour except the current hour (those will no longer change) and every user recorded for the current hour on this node.
++// Then it tracks the amount that needs to be kept out of the sum. This is logically the amount we're adding back in.
++// Because we already counted all the users in the persisted sum, we need to exclude the amount we'll be placing back
++// in memory.
++func removePersistedRequestCounts(nodeName string, currentHour int, persistedStatus *apiv1.APIRequestCountStatus, localResourceCount *resourceRequestCounts) {
++	for hourIndex := range localResourceCount.hourToRequestCount {
++		if currentHour != hourIndex {
++			localResourceCount.RemoveHour(hourIndex)
++		}
++	}
++	for _, persistedNodeCount := range persistedStatus.CurrentHour.ByNode {
++		if persistedNodeCount.NodeName != nodeName {
++			continue
++		}
++		for _, persistedUserCount := range persistedNodeCount.ByUser {
++			userKey := userKey{
++				user:      persistedUserCount.UserName,
++				userAgent: persistedUserCount.UserAgent,
++			}
++			localResourceCount.Hour(currentHour).RemoveUser(userKey)
++		}
++	}
++
++	countToSuppress := int64(0)
++	for _, userCounts := range localResourceCount.Hour(currentHour).usersToRequestCounts {
++		for _, verbCount := range userCounts.verbsToRequestCounts {
++			countToSuppress += verbCount.count
++		}
++	}
++
++	localResourceCount.Hour(currentHour).countToSuppress = countToSuppress
++}
++
++func resourceToAPIName(resource schema.GroupVersionResource) string {
++	apiName := resource.Resource + "." + resource.Version
++	if len(resource.Group) > 0 {
++		apiName += "." + resource.Group
++	}
++	return apiName
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller_test.go b/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller_test.go
+new file mode 100644
+index 00000000000..19631c17524
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/apiaccess_count_controller_test.go
+@@ -0,0 +1,1242 @@
++package apirequestcount
++
++import (
++	"context"
++	"fmt"
++	"sort"
++	"strconv"
++	"strings"
++	"testing"
++	"time"
++
++	"github.com/google/go-cmp/cmp"
++	apiv1 "github.com/openshift/api/apiserver/v1"
++	"github.com/openshift/client-go/apiserver/clientset/versioned/fake"
++	"github.com/stretchr/testify/assert"
++	"k8s.io/apimachinery/pkg/api/equality"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/util/diff"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/customresourcevalidation/apirequestcount"
++)
++
++func TestRemovedRelease(t *testing.T) {
++	rr := removedRelease(
++		schema.GroupVersionResource{
++			Group:    "flowcontrol.apiserver.k8s.io",
++			Version:  "v1alpha1",
++			Resource: "flowschemas",
++		})
++	assert.Equal(t, "1.21", rr)
++}
++
++func TestLoggingResetRace(t *testing.T) {
++	c := &controller{}
++	c.resetRequestCount()
++
++	start := make(chan struct{})
++	for i := 0; i < 20; i++ {
++		go func() {
++			<-start
++			for i := 0; i < 100; i++ {
++				c.LogRequest(schema.GroupVersionResource{Resource: "pods"}, time.Now(), "user", "some-agent", "verb")
++			}
++		}()
++	}
++
++	for i := 0; i < 10; i++ {
++		go func() {
++			<-start
++			for i := 0; i < 100; i++ {
++				c.resetRequestCount()
++			}
++		}()
++	}
++
++	close(start)
++
++	// hope for no data race, which of course failed
++}
++
++func TestAPIStatusToRequestCount(t *testing.T) {
++	testCases := []struct {
++		name     string
++		resource schema.GroupVersionResource
++		status   *apiv1.APIRequestCountStatus
++		expected *clusterRequestCounts
++	}{
++		{
++			name:     "Empty",
++			resource: gvr("test.v1.group"),
++			status:   &apiv1.APIRequestCountStatus{},
++			expected: cluster(),
++		},
++		{
++			name:     "NotEmpty",
++			resource: gvr("test.v1.group"),
++			status: &apiv1.APIRequestCountStatus{
++				Last24h: []apiv1.PerResourceAPIRequestLog{
++					{},
++					{},
++					{},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node1", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "eva", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 625}, {Verb: "watch", RequestCount: 540},
++							}},
++						}},
++						{NodeName: "node3", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "list", RequestCount: 1427}, {Verb: "create", RequestCount: 1592}, {Verb: "watch", RequestCount: 1143},
++							}},
++							{UserName: "ava", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "update", RequestCount: 40}, {Verb: "patch", RequestCount: 1047},
++							}},
++						}},
++						{NodeName: "node5", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "delete", RequestCount: 360}, {Verb: "deletecollection", RequestCount: 1810}, {Verb: "update", RequestCount: 149},
++							}},
++							{UserName: "zoe", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 1714}, {Verb: "watch", RequestCount: 606}, {Verb: "list", RequestCount: 703},
++							}},
++						}},
++						{NodeName: "node2", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 305},
++							}},
++							{UserName: "ivy", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "create", RequestCount: 1113},
++							}},
++							{UserName: "zoe", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "patch", RequestCount: 1217}, {Verb: "delete", RequestCount: 1386},
++							}},
++						}},
++					}},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node1", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "delete", RequestCount: 1386},
++							}},
++						}},
++						{NodeName: "node5", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "ava", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "create", RequestCount: 1091},
++							}},
++						}},
++					}},
++					{},
++					{},
++					{},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node3", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "eva", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "list", RequestCount: 20},
++							}},
++						}},
++					}},
++				},
++			},
++			expected: cluster(
++				withNode("node1",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("eva", "some-agent", withCounts("get", 625), withCounts("watch", 540)),
++						),
++						withHour(4,
++							withUser("mia", "some-agent", withCounts("delete", 1386)),
++						),
++					),
++				),
++				withNode("node3",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("list", 1427),
++								withCounts("create", 1592),
++								withCounts("watch", 1143),
++							),
++							withUser("ava", "some-agent",
++								withCounts("update", 40),
++								withCounts("patch", 1047),
++							),
++						),
++						withHour(8,
++							withUser("eva", "some-agent", withCounts("list", 20)),
++						),
++					),
++				),
++				withNode("node5",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("delete", 360),
++								withCounts("deletecollection", 1810),
++								withCounts("update", 149),
++							),
++							withUser("zoe", "some-agent",
++								withCounts("get", 1714),
++								withCounts("watch", 606),
++								withCounts("list", 703),
++							),
++						),
++						withHour(4,
++							withUser("ava", "some-agent", withCounts("create", 1091)),
++						),
++					),
++				),
++				withNode("node2",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("get", 305),
++							),
++							withUser("ivy", "some-agent",
++								withCounts("create", 1113),
++							),
++							withUser("zoe", "some-agent",
++								withCounts("patch", 1217),
++								withCounts("delete", 1386),
++							),
++						),
++					),
++				),
++			),
++		},
++		{
++			name:     "SplitUserAgent",
++			resource: gvr("test.v1.group"),
++			status: &apiv1.APIRequestCountStatus{
++				Last24h: []apiv1.PerResourceAPIRequestLog{
++					{},
++					{},
++					{},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node1", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "eva", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 625}, {Verb: "watch", RequestCount: 540},
++							}},
++						}},
++						{NodeName: "node3", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "list", RequestCount: 1427}, {Verb: "create", RequestCount: 1592}, {Verb: "watch", RequestCount: 1143},
++							}},
++							{UserName: "mia", UserAgent: "DIFFERENT-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "delete", RequestCount: 531},
++							}},
++							{UserName: "ava", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "update", RequestCount: 40}, {Verb: "patch", RequestCount: 1047},
++							}},
++						}},
++						{NodeName: "node5", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "delete", RequestCount: 360}, {Verb: "deletecollection", RequestCount: 1810}, {Verb: "update", RequestCount: 149},
++							}},
++							{UserName: "zoe", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 1714}, {Verb: "watch", RequestCount: 606}, {Verb: "list", RequestCount: 703},
++							}},
++						}},
++						{NodeName: "node2", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "get", RequestCount: 305},
++							}},
++							{UserName: "ivy", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "create", RequestCount: 1113},
++							}},
++							{UserName: "zoe", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "patch", RequestCount: 1217}, {Verb: "delete", RequestCount: 1386},
++							}},
++						}},
++					}},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node1", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "mia", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "delete", RequestCount: 1386},
++							}},
++						}},
++						{NodeName: "node5", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "ava", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "create", RequestCount: 1091},
++							}},
++						}},
++					}},
++					{},
++					{},
++					{},
++					{ByNode: []apiv1.PerNodeAPIRequestLog{
++						{NodeName: "node3", ByUser: []apiv1.PerUserAPIRequestCount{
++							{UserName: "eva", UserAgent: "some-agent", ByVerb: []apiv1.PerVerbAPIRequestCount{
++								{Verb: "list", RequestCount: 20},
++							}},
++						}},
++					}},
++				},
++			},
++			expected: cluster(
++				withNode("node1",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("eva", "some-agent", withCounts("get", 625), withCounts("watch", 540)),
++						),
++						withHour(4,
++							withUser("mia", "some-agent", withCounts("delete", 1386)),
++						),
++					),
++				),
++				withNode("node3",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("list", 1427),
++								withCounts("create", 1592),
++								withCounts("watch", 1143),
++							),
++							withUser("mia", "DIFFERENT-agent",
++								withCounts("delete", 531),
++							),
++							withUser("ava", "some-agent",
++								withCounts("update", 40),
++								withCounts("patch", 1047),
++							),
++						),
++						withHour(8,
++							withUser("eva", "some-agent", withCounts("list", 20)),
++						),
++					),
++				),
++				withNode("node5",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("delete", 360),
++								withCounts("deletecollection", 1810),
++								withCounts("update", 149),
++							),
++							withUser("zoe", "some-agent",
++								withCounts("get", 1714),
++								withCounts("watch", 606),
++								withCounts("list", 703),
++							),
++						),
++						withHour(4,
++							withUser("ava", "some-agent", withCounts("create", 1091)),
++						),
++					),
++				),
++				withNode("node2",
++					withResource("test.v1.group",
++						withHour(3,
++							withUser("mia", "some-agent",
++								withCounts("get", 305),
++							),
++							withUser("ivy", "some-agent",
++								withCounts("create", 1113),
++							),
++							withUser("zoe", "some-agent",
++								withCounts("patch", 1217),
++								withCounts("delete", 1386),
++							),
++						),
++					),
++				),
++			),
++		},
++	}
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			actual := apiStatusToRequestCount(tc.resource, tc.status)
++			assert.Equal(t, actual, tc.expected)
++		})
++	}
++}
++
++func TestSetRequestCountsForNode(t *testing.T) {
++	testCases := []struct {
++		name            string
++		nodeName        string
++		expiredHour     int
++		countsToPersist *resourceRequestCounts
++		status          *apiv1.APIRequestCountStatus
++		expected        *apiv1.APIRequestCountStatus
++	}{
++		{
++			name:            "Empty",
++			nodeName:        "node1",
++			expiredHour:     5,
++			countsToPersist: resource("test.v1.group"),
++			status:          &apiv1.APIRequestCountStatus{},
++			expected: apiRequestCountStatus(
++				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "EmptyStatus",
++			nodeName:    "node1",
++			expiredHour: 5,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withUser("eva", "some-agent", withCounts("get", 625), withCounts("watch", 540)),
++				),
++				withHour(4,
++					withUser("mia", "some-agent", withCounts("delete", 1386)),
++				),
++			),
++			status: &apiv1.APIRequestCountStatus{},
++			expected: apiRequestCountStatus(
++				withRequestLastHour(
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++				),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "UpdateAndExpire",
++			nodeName:    "node1",
++			expiredHour: 3,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withUser("eva", "some-agent", withCounts("get", 625), withCounts("watch", 540)),
++				),
++				withHour(4,
++					withUser("mia", "some-agent", withCounts("delete", 1386)),
++				),
++				withHour(5,
++					withUser("mia", "some-agent", withCounts("list", 434)),
++				),
++			),
++			status: apiRequestCountStatus(
++				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++			expected: apiRequestCountStatus(
++				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
++				withRequestLast24hN("0-2,4-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 2772)),
++				)),
++				withRequestLast24h(5, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("list", 434)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "OtherNode",
++			nodeName:    "node2",
++			expiredHour: 5,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withUser("mia", "some-agent", withCounts("get", 305)),
++					withUser("ivy", "some-agent", withCounts("create", 1113)),
++					withUser("zoe", "some-agent", withCounts("patch", 1217), withCounts("delete", 1386)),
++				),
++			),
++			status: apiRequestCountStatus(
++				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++			expected: apiRequestCountStatus(
++				withRequestLastHour(
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++					withPerNodeAPIRequestLog("node2"),
++				),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1"), withPerNodeAPIRequestLog("node2")),
++				withRequestLast24h(3,
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++					),
++					withPerNodeAPIRequestLog("node2",
++						withPerUserAPIRequestCount("zoe", "some-agent", withRequestCount("delete", 1386), withRequestCount("patch", 1217)),
++						withPerUserAPIRequestCount("ivy", "some-agent", withRequestCount("create", 1113)),
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("get", 305)),
++					),
++				),
++				withRequestLast24h(4,
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++					withPerNodeAPIRequestLog("node2"),
++				),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "PreviousCountSuppression",
++			nodeName:    "node2",
++			expiredHour: 5,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withCountToSuppress(10),
++					withUser("mia", "some-agent", withCounts("get", 305)),
++					withUser("ivy", "some-agent", withCounts("create", 1113)),
++					withUser("zoe", "some-agent", withCounts("patch", 1217), withCounts("delete", 1386)),
++				),
++			),
++			status: apiRequestCountStatus(
++				withRequestLastHour(withPerNodeAPIRequestLog("node1")),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++			expected: apiRequestCountStatus(
++				withRequestLastHour(
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++					withPerNodeAPIRequestLog("node2"),
++				),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1"), withPerNodeAPIRequestLog("node2")),
++				withRequestLast24h(3,
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++					),
++					withPerNodeAPIRequestLog("node2",
++						withPerNodeRequestCount(4011),
++						withPerUserAPIRequestCount("zoe", "some-agent", withRequestCount("delete", 1386), withRequestCount("patch", 1217)),
++						withPerUserAPIRequestCount("ivy", "some-agent", withRequestCount("create", 1113)),
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("get", 305)),
++					),
++				),
++				withRequestLast24h(4,
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++					withPerNodeAPIRequestLog("node2"),
++				),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "UniqueAgents",
++			nodeName:    "node1",
++			expiredHour: 5,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withUser("eva", "some-agent", withCounts("get", 625), withCounts("watch", 540)),
++				),
++				withHour(4,
++					withUser("mia", "some-agent", withCounts("delete", 1386)),
++					withUser("mia", "DIFFERENT-agent", withCounts("delete", 542)),
++				),
++			),
++			status: &apiv1.APIRequestCountStatus{},
++			expected: apiRequestCountStatus(
++				withRequestLastHour(
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++						withPerUserAPIRequestCount("mia", "DIFFERENT-agent", withRequestCount("delete", 542)),
++					),
++				),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					withPerUserAPIRequestCount("mia", "DIFFERENT-agent", withRequestCount("delete", 542)),
++				)),
++				withComputedRequestCountTotals(),
++			),
++		},
++		{
++			name:        "NumberOfUsersToReport",
++			nodeName:    "node1",
++			expiredHour: 5,
++			countsToPersist: resource("test.v1.group",
++				withHour(3,
++					withUser("ana", "some-agent", withCounts("get", 101)),
++					withUser("bob", "some-agent", withCounts("get", 102)),
++					withUser("eva", "some-agent", withCounts("get", 103)),
++					withUser("gus", "some-agent", withCounts("get", 104)),
++					withUser("ivy", "some-agent", withCounts("get", 105)),
++					withUser("joe", "some-agent", withCounts("get", 106)),
++					withUser("lia", "some-agent", withCounts("get", 107)),
++					withUser("max", "some-agent", withCounts("get", 108)),
++					withUser("mia", "some-agent", withCounts("get", 109)),
++					withUser("rex", "some-agent", withCounts("get", 110)),
++					withUser("amy", "some-agent", withCounts("get", 100)),
++					withUser("zoe", "some-agent", withCounts("get", 111)),
++				),
++				withHour(4,
++					withUser("mia", "some-agent", withCounts("delete", 1386)),
++				),
++			),
++			status: &apiv1.APIRequestCountStatus{},
++			expected: apiRequestCountStatus(
++				withRequestLastHour(
++					withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++					),
++				),
++				withRequestLast24hN("0-4,6-23", withPerNodeAPIRequestLog("node1")),
++				withRequestLast24h(3, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("zoe", "some-agent", withRequestCount("get", 111)),
++					withPerUserAPIRequestCount("rex", "some-agent", withRequestCount("get", 110)),
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("get", 109)),
++					withPerUserAPIRequestCount("max", "some-agent", withRequestCount("get", 108)),
++					withPerUserAPIRequestCount("lia", "some-agent", withRequestCount("get", 107)),
++					withPerUserAPIRequestCount("joe", "some-agent", withRequestCount("get", 106)),
++					withPerUserAPIRequestCount("ivy", "some-agent", withRequestCount("get", 105)),
++					withPerUserAPIRequestCount("gus", "some-agent", withRequestCount("get", 104)),
++					withPerUserAPIRequestCount("eva", "some-agent", withRequestCount("get", 103)),
++					withPerUserAPIRequestCount("bob", "some-agent", withRequestCount("get", 102)),
++				)),
++				withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++					withPerUserAPIRequestCount("mia", "some-agent", withRequestCount("delete", 1386)),
++				)),
++				withComputedRequestCountTotals(
++					withAdditionalRequestCounts(3, "node1", 101),
++					withAdditionalRequestCounts(3, "node1", 100),
++				),
++			),
++		},
++	}
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			currentHour := tc.expiredHour - 1
++			SetRequestCountsForNode(tc.nodeName, currentHour, tc.expiredHour, tc.countsToPersist)(10, tc.status)
++			assert.Equal(t, tc.expected, tc.status)
++		})
++	}
++
++}
++
++func TestPersistRequestCountForAllResources(t *testing.T) {
++
++	type logRequestFn func(*controller)
++
++	testCases := []struct {
++		name        string
++		currentHour int
++		existing    []runtime.Object
++		requests    []logRequestFn
++		expected    []*apiv1.APIRequestCount
++	}{
++		{
++			name: "Noop",
++		},
++		{
++			name: "EmptyStatus",
++			existing: []runtime.Object{
++				apiRequestCount("test.v1.group"),
++			},
++			expected: []*apiv1.APIRequestCount{
++				apiRequestCount("test.v1.group", withStatus(
++					withRequestLastHour(withPerNodeAPIRequestLog("node10")),
++					withRequestLast24hN("0,2-23", withPerNodeAPIRequestLog("node10")),
++				)),
++			},
++		},
++		{
++			name: "IgnoreInvalidResourceName",
++			existing: []runtime.Object{
++				apiRequestCount("test-v1-invalid"),
++				apiRequestCount("test.v1.group"),
++			},
++			expected: []*apiv1.APIRequestCount{
++				apiRequestCount("test-v1-invalid"),
++				apiRequestCount("test.v1.group", withStatus(
++					withRequestLastHour(withPerNodeAPIRequestLog("node10")),
++					withRequestLast24hN("0,2-23", withPerNodeAPIRequestLog("node10")),
++				)),
++			},
++		},
++		{
++			name: "OnRestart",
++			existing: []runtime.Object{
++				// current hour is 0, this api has not been requested since hour 20
++				apiRequestCount("test.v1.group",
++					withStatus(
++						withRequestLastHour(
++							withPerNodeAPIRequestLog("node10",
++								withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 100)),
++							),
++						),
++						withRequestLast24hN("*", withPerNodeAPIRequestLog("node10")),
++						withRequestLast24h(20, withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 100)),
++						)),
++						withComputedRequestCountTotals(),
++					),
++				),
++				// this api will have some current requests
++				apiRequestCount("test.v2.group"),
++			},
++			requests: []logRequestFn{
++				withRequestN("test.v2.group", 0, "user10", "agent10", "get", 53),
++				withRequestN("test.v3.group", 0, "user10", "agent10", "get", 57),
++			},
++			expected: []*apiv1.APIRequestCount{
++				apiRequestCount("test.v1.group",
++					withStatus(
++						withRequestLastHour(withPerNodeAPIRequestLog("node10")),
++						withRequestLast24hN("0,2-23", withPerNodeAPIRequestLog("node10")),
++						withRequestLast24h(20, withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 100)),
++						)),
++						withComputedRequestCountTotals(),
++					),
++				),
++				apiRequestCount("test.v2.group",
++					withStatus(
++						withRequestLastHour(withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 53)),
++						)),
++						withRequestLast24hN("0,2-23", withPerNodeAPIRequestLog("node10")),
++						withRequestLast24h(0, withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 53)),
++						)),
++						withComputedRequestCountTotals(),
++					),
++				),
++				apiRequestCount("test.v3.group",
++					withStatus(
++						withRequestLastHour(withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 57)),
++						)),
++						withRequestLast24hN("0,2-23", withPerNodeAPIRequestLog("node10")),
++						withRequestLast24h(0, withPerNodeAPIRequestLog("node10",
++							withPerUserAPIRequestCount("user10", "agent10", withRequestCount("get", 57)),
++						)),
++						withComputedRequestCountTotals(),
++					),
++				),
++			},
++		},
++	}
++	ctx, cancel := context.WithCancel(context.Background())
++	defer cancel()
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			c := NewController(
++				fake.NewSimpleClientset(tc.existing...).ApiserverV1().APIRequestCounts(),
++				"node10",
++			)
++			c.updatePeriod = time.Millisecond
++
++			for _, logRequest := range tc.requests {
++				logRequest(c)
++			}
++			c.persistRequestCountForAllResources(ctx, tc.currentHour)
++
++			arcs, err := c.client.List(ctx, metav1.ListOptions{})
++			if err != nil {
++				t.Fatal(err)
++			}
++			if len(arcs.Items) != len(tc.expected) {
++				t.Errorf("expected %d APIRequestCounts, got %d.", len(tc.expected), len(arcs.Items))
++			}
++
++			for _, expectedARC := range tc.expected {
++				actual, err := c.client.Get(ctx, expectedARC.Name, metav1.GetOptions{})
++				if err != nil {
++					t.Error(err)
++				}
++				if !equality.Semantic.DeepEqual(expectedARC, actual) {
++					t.Error(cmp.Diff(expectedARC, actual))
++				}
++			}
++		})
++	}
++
++	t.Run("Deleted", func(t *testing.T) {
++
++		// "start" controller
++		c := NewController(
++			fake.NewSimpleClientset().ApiserverV1().APIRequestCounts(),
++			"node10",
++		)
++		c.updatePeriod = time.Millisecond
++
++		// log requests
++		withRequest("test.v1.group", 0, "user10", "agent10", "get")(c)
++		withRequest("test.v2.group", 0, "user10", "agent10", "get")(c)
++		withRequest("test.v3.group", 0, "user10", "agent10", "get")(c)
++
++		// sync
++		c.persistRequestCountForAllResources(ctx, 0)
++
++		// assert apirequestcounts created
++		for _, n := range []string{"test.v1.group", "test.v2.group", "test.v3.group"} {
++			if _, err := c.client.Get(ctx, n, metav1.GetOptions{}); err != nil {
++				t.Fatalf("Expected APIRequestCount %s: %s", n, err)
++			}
++		}
++
++		// delete an apirequestcount
++		deleted := "test.v2.group"
++		if err := c.client.Delete(ctx, deleted, metav1.DeleteOptions{}); err != nil {
++			t.Fatalf("Unable to delete APIRequestCount %s: %s", deleted, err)
++		}
++
++		// log requests
++		withRequest("test.v1.group", 1, "user11", "agent11", "get")(c)
++		withRequest("test.v3.group", 1, "user11", "agent11", "get")(c)
++
++		// sync
++		c.persistRequestCountForAllResources(ctx, 1)
++
++		// assert deleted apirequestcounts not re-created
++		if _, err := c.client.Get(ctx, deleted, metav1.GetOptions{}); err == nil {
++			t.Fatalf("Did not expect to find deleted APIRequestCount %s.", deleted)
++		}
++
++	})
++
++	t.Run("24HourLogExpiration", func(t *testing.T) {
++
++		// "start" controller
++		c := NewController(
++			fake.NewSimpleClientset().ApiserverV1().APIRequestCounts(),
++			"node10",
++		)
++		c.updatePeriod = time.Millisecond
++
++		// log 24 hrs of request requests
++		for i := 0; i < 24; i++ {
++			suffix := fmt.Sprintf("%02d", i)
++			withRequest("test.v1.group", i, "user"+suffix, "agent"+suffix, "get")(c)
++		}
++
++		// sync
++		c.persistRequestCountForAllResources(ctx, 0)
++
++		// assert apirequestcounts created
++		actual, err := c.client.Get(ctx, "test.v1.group", metav1.GetOptions{})
++		if err != nil {
++			t.Fatalf("Expected APIRequestCount %s: %s", "test.v1.group", err)
++		}
++
++		expectedCounts := []int64{1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1}
++
++		// assert expected counts
++		if actual.Status.CurrentHour.RequestCount != 1 {
++			t.Fatalf("%02d: CH: expected requestCount: %d, actual: %d", 0, 1, actual.Status.CurrentHour.RequestCount)
++		}
++		for i := range actual.Status.Last24h {
++			if actual.Status.Last24h[i].RequestCount != expectedCounts[i] {
++				t.Fatalf("%02d: %02d: expected requestCount: %d, actual: %d", 0, i, expectedCounts[i], actual.Status.Last24h[i].RequestCount)
++			}
++		}
++
++		// sync 24 hrs
++		for i := 1; i < 24; i++ {
++			c.persistRequestCountForAllResources(ctx, i)
++
++			// next hour should be clear
++			expectedCounts[(i+1)%24] = 0
++
++			actual, err = c.client.Get(ctx, "test.v1.group", metav1.GetOptions{})
++			if err != nil {
++				t.Fatalf("Expected APIRequestCount %s: %s", "test.v1.group", err)
++			}
++			// assert expected counts
++			if actual.Status.CurrentHour.RequestCount != 0 {
++				t.Fatalf("%02d: CH: expected requestCount: %d, actual: %d", i, 0, actual.Status.CurrentHour.RequestCount)
++			}
++			for h := range actual.Status.Last24h {
++				if actual.Status.Last24h[h].RequestCount != expectedCounts[h] {
++					t.Fatalf("%02d: %02d: expected requestCount: %d, actual: %d", 0, i, expectedCounts[h], actual.Status.Last24h[h].RequestCount)
++				}
++			}
++		}
++	})
++
++}
++func withRequestN(resource string, hour int, user, agent, verb string, n int) func(*controller) {
++	f := withRequest(resource, hour, user, agent, verb)
++	return func(c *controller) {
++		for i := 0; i < n; i++ {
++			f(c)
++		}
++	}
++}
++
++func withRequest(resource string, hour int, user, agent, verb string) func(*controller) {
++	ts := time.Date(2021, 11, 9, hour, 0, 0, 0, time.UTC)
++	return func(c *controller) {
++		gvr, err := apirequestcount.NameToResource(resource)
++		if err != nil {
++			panic(err)
++		}
++		c.LogRequest(gvr, ts, user, agent, verb)
++	}
++}
++
++func withPerUserAPIRequestCount(user, userAgent string, options ...func(*apiv1.PerUserAPIRequestCount)) func(*apiv1.PerNodeAPIRequestLog) {
++	return func(nodeRequestLog *apiv1.PerNodeAPIRequestLog) {
++		requestUser := &apiv1.PerUserAPIRequestCount{
++			UserName:  user,
++			UserAgent: userAgent,
++		}
++		for _, f := range options {
++			f(requestUser)
++		}
++		nodeRequestLog.ByUser = append(nodeRequestLog.ByUser, *requestUser)
++	}
++}
++
++func withRequestCount(verb string, count int64) func(user *apiv1.PerUserAPIRequestCount) {
++	return func(requestUser *apiv1.PerUserAPIRequestCount) {
++		requestCount := apiv1.PerVerbAPIRequestCount{Verb: verb, RequestCount: count}
++		requestUser.ByVerb = append(requestUser.ByVerb, requestCount)
++		requestUser.RequestCount += count
++	}
++}
++
++func withAdditionalRequestCounts(hour int, node string, counts int) func(map[int]map[string]int64) {
++	return func(m map[int]map[string]int64) {
++		if _, ok := m[hour]; !ok {
++			m[hour] = map[string]int64{}
++		}
++		m[hour][node] = m[hour][node] + int64(counts)
++	}
++}
++
++func withComputedRequestCountTotals(options ...func(map[int]map[string]int64)) func(*apiv1.APIRequestCountStatus) {
++	additionalCounts := map[int]map[string]int64{}
++	for _, f := range options {
++		f(additionalCounts)
++	}
++	return func(status *apiv1.APIRequestCountStatus) {
++		totalForDay := int64(0)
++		for hourIndex, hourlyCount := range status.Last24h {
++			totalForHour := int64(0)
++			for nodeIndex, nodeCount := range hourlyCount.ByNode {
++				totalForNode := int64(0)
++				for _, userCount := range nodeCount.ByUser {
++					totalForNode += userCount.RequestCount
++				}
++				totalForNode += additionalCounts[hourIndex][nodeCount.NodeName]
++				// only set the perNode count if it is not set already
++				if status.Last24h[hourIndex].ByNode[nodeIndex].RequestCount == 0 {
++					status.Last24h[hourIndex].ByNode[nodeIndex].RequestCount = totalForNode
++				}
++				totalForHour += status.Last24h[hourIndex].ByNode[nodeIndex].RequestCount
++			}
++			status.Last24h[hourIndex].RequestCount = totalForHour
++			totalForDay += totalForHour
++		}
++		status.RequestCount = totalForDay
++
++		totalForCurrentHour := int64(0)
++		for nodeIndex, nodeCount := range status.CurrentHour.ByNode {
++			totalForNode := int64(0)
++			for _, userCount := range nodeCount.ByUser {
++				totalForNode += userCount.RequestCount
++			}
++			// only set the perNode count if it is not set already
++			if status.CurrentHour.ByNode[nodeIndex].RequestCount == 0 {
++				status.CurrentHour.ByNode[nodeIndex].RequestCount = totalForNode
++			}
++			totalForCurrentHour += status.CurrentHour.ByNode[nodeIndex].RequestCount
++		}
++		status.CurrentHour.RequestCount = totalForCurrentHour
++	}
++}
++
++func apiRequestCount(n string, options ...func(*apiv1.APIRequestCount)) *apiv1.APIRequestCount {
++	arc := &apiv1.APIRequestCount{
++		ObjectMeta: metav1.ObjectMeta{Name: n},
++		Spec:       apiv1.APIRequestCountSpec{NumberOfUsersToReport: 10},
++	}
++	for _, f := range options {
++		f(arc)
++	}
++	return arc
++}
++
++func withStatus(options ...func(*apiv1.APIRequestCountStatus)) func(*apiv1.APIRequestCount) {
++	return func(arc *apiv1.APIRequestCount) {
++		arc.Status = *apiRequestCountStatus(options...)
++	}
++}
++
++func apiRequestCountStatus(options ...func(*apiv1.APIRequestCountStatus)) *apiv1.APIRequestCountStatus {
++	status := &apiv1.APIRequestCountStatus{}
++	for _, f := range options {
++		f(status)
++	}
++	return status
++}
++
++func requestLog(options ...func(*apiv1.PerResourceAPIRequestLog)) apiv1.PerResourceAPIRequestLog {
++	requestLog := &apiv1.PerResourceAPIRequestLog{}
++	for _, f := range options {
++		f(requestLog)
++	}
++	return *requestLog
++}
++
++func withRequestLastHour(options ...func(*apiv1.PerResourceAPIRequestLog)) func(*apiv1.APIRequestCountStatus) {
++	return func(status *apiv1.APIRequestCountStatus) {
++		status.CurrentHour = requestLog(options...)
++	}
++}
++
++func withRequestLast24hN(hours string, options ...func(*apiv1.PerResourceAPIRequestLog)) func(*apiv1.APIRequestCountStatus) {
++	var hrs []int
++	for _, s := range strings.Split(hours, ",") {
++		from, to := 0, 23
++		var err error
++		switch {
++		case s == "*":
++		case strings.Contains(s, "-"):
++			rs := strings.Split(s, "-")
++			if from, err = strconv.Atoi(rs[0]); err != nil {
++				panic(err)
++			}
++			if to, err = strconv.Atoi(rs[1]); err != nil {
++				panic(err)
++			}
++		default:
++			if from, err = strconv.Atoi(s); err != nil {
++				panic(err)
++			}
++			to = from
++		}
++		for i := from; i <= to; i++ {
++			hrs = append(hrs, i)
++		}
++	}
++	sort.Ints(hrs)
++	var fns []func(*apiv1.APIRequestCountStatus)
++	for _, h := range hrs {
++		fns = append(fns, withRequestLast24h(h, options...))
++	}
++	return func(status *apiv1.APIRequestCountStatus) {
++		for _, f := range fns {
++			f(status)
++		}
++	}
++}
++
++func withRequestLast24h(hour int, options ...func(*apiv1.PerResourceAPIRequestLog)) func(*apiv1.APIRequestCountStatus) {
++	return func(status *apiv1.APIRequestCountStatus) {
++		if status.Last24h == nil {
++			status.Last24h = make([]apiv1.PerResourceAPIRequestLog, 24)
++		}
++		status.Last24h[hour] = requestLog(options...)
++	}
++}
++
++func withPerNodeAPIRequestLog(node string, options ...func(*apiv1.PerNodeAPIRequestLog)) func(*apiv1.PerResourceAPIRequestLog) {
++	return func(log *apiv1.PerResourceAPIRequestLog) {
++		nodeRequestLog := &apiv1.PerNodeAPIRequestLog{NodeName: node}
++		for _, f := range options {
++			f(nodeRequestLog)
++		}
++		log.ByNode = append(log.ByNode, *nodeRequestLog)
++	}
++}
++
++func withPerNodeRequestCount(requestCount int64) func(*apiv1.PerNodeAPIRequestLog) {
++	return func(log *apiv1.PerNodeAPIRequestLog) {
++		log.RequestCount = requestCount
++	}
++}
++
++func cluster(options ...func(*clusterRequestCounts)) *clusterRequestCounts {
++	c := &clusterRequestCounts{nodeToRequestCount: map[string]*apiRequestCounts{}}
++	for _, f := range options {
++		f(c)
++	}
++	return c
++}
++
++func withNode(name string, options ...func(counts *apiRequestCounts)) func(*clusterRequestCounts) {
++	return func(c *clusterRequestCounts) {
++		n := &apiRequestCounts{
++			nodeName:               name,
++			resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{},
++		}
++		for _, f := range options {
++			f(n)
++		}
++		c.nodeToRequestCount[name] = n
++	}
++}
++
++func resource(resource string, options ...func(counts *resourceRequestCounts)) *resourceRequestCounts {
++	gvr := gvr(resource)
++	r := &resourceRequestCounts{
++		resource:           gvr,
++		hourToRequestCount: make(map[int]*hourlyRequestCounts, 24),
++	}
++	for _, f := range options {
++		f(r)
++	}
++	return r
++}
++
++func withResource(r string, options ...func(counts *resourceRequestCounts)) func(*apiRequestCounts) {
++	gvr := gvr(r)
++	return func(n *apiRequestCounts) {
++		n.resourceToRequestCount[gvr] = resource(r, options...)
++	}
++}
++
++func withHour(hour int, options ...func(counts *hourlyRequestCounts)) func(counts *resourceRequestCounts) {
++	return func(r *resourceRequestCounts) {
++		h := &hourlyRequestCounts{
++			usersToRequestCounts: map[userKey]*userRequestCounts{},
++		}
++		for _, f := range options {
++			f(h)
++		}
++		r.hourToRequestCount[hour] = h
++	}
++}
++
++func withCountToSuppress(countToSuppress int64) func(counts *hourlyRequestCounts) {
++	return func(h *hourlyRequestCounts) {
++		h.countToSuppress = countToSuppress
++	}
++}
++
++func withUser(user, userAgent string, options ...func(*userRequestCounts)) func(counts *hourlyRequestCounts) {
++	return func(h *hourlyRequestCounts) {
++		u := &userRequestCounts{
++			user: userKey{
++				user:      user,
++				userAgent: userAgent,
++			},
++			verbsToRequestCounts: map[string]*verbRequestCount{},
++		}
++		for _, f := range options {
++			f(u)
++		}
++		h.usersToRequestCounts[u.user] = u
++	}
++}
++
++func withCounts(verb string, count int64) func(*userRequestCounts) {
++	return func(u *userRequestCounts) {
++		u.verbsToRequestCounts[verb] = &verbRequestCount{count: count}
++	}
++}
++
++func Test_removePersistedRequestCounts(t *testing.T) {
++
++	type args struct {
++		nodeName           string
++		currentHour        int
++		persistedStatus    *apiv1.APIRequestCountStatus
++		localResourceCount *resourceRequestCounts
++	}
++	tests := []struct {
++		name     string
++		args     args
++		expected *resourceRequestCounts
++	}{
++		{
++			name: "other-hours-gone",
++			args: args{
++				nodeName:    "node1",
++				currentHour: 6,
++				persistedStatus: apiRequestCountStatus(
++					withRequestLastHour(withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "mia-agent", withRequestCount("delete", 1386)),
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 725), withRequestCount("watch", 640)),
++					)),
++					withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++					)),
++					withRequestLast24h(5, withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "mia-agent", withRequestCount("delete", 1386)),
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 725), withRequestCount("watch", 640)),
++					)),
++					withComputedRequestCountTotals(),
++				),
++				localResourceCount: resource("test.v1.group",
++					withHour(4,
++						withUser("bob", "bob-agent", withCounts("get", 41), withCounts("watch", 63)),
++					),
++					withHour(5,
++						withUser("mia", "mia-agent", withCounts("delete", 712)),
++					),
++				),
++			},
++			expected: resource("test.v1.group",
++				withHour(6),
++			),
++		},
++		{
++			name: "remove persisted user, keep non-persisted user",
++			args: args{
++				nodeName:    "node1",
++				currentHour: 5,
++				persistedStatus: apiRequestCountStatus(
++					withRequestLastHour(withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "mia-agent", withRequestCount("delete", 1386)),
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 725), withRequestCount("watch", 640)),
++					)),
++					withRequestLast24h(4, withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 625), withRequestCount("watch", 540)),
++					)),
++					withRequestLast24h(5, withPerNodeAPIRequestLog("node1",
++						withPerUserAPIRequestCount("mia", "mia-agent", withRequestCount("delete", 1386)),
++						withPerUserAPIRequestCount("eva", "eva-agent", withRequestCount("get", 725), withRequestCount("watch", 640)),
++					)),
++					withComputedRequestCountTotals(),
++				),
++				localResourceCount: resource("test.v1.group",
++					withHour(4,
++						withUser("bob", "bob-agent", withCounts("get", 41), withCounts("watch", 63)),
++					),
++					withHour(5,
++						withUser("mark", "mark-agent", withCounts("delete", 5)),
++						withUser("mia", "mia-agent", withCounts("delete", 712)),
++					),
++				),
++			},
++			expected: resource("test.v1.group",
++				withHour(5,
++					withCountToSuppress(5),
++					withUser("mark", "mark-agent", withCounts("delete", 5)),
++				),
++			),
++		},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			removePersistedRequestCounts(tt.args.nodeName, tt.args.currentHour, tt.args.persistedStatus, tt.args.localResourceCount)
++			if !tt.expected.Equals(tt.args.localResourceCount) {
++				t.Error(diff.StringDiff(tt.expected.String(), tt.args.localResourceCount.String()))
++			}
++		})
++	}
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/deprecated.go b/openshift-kube-apiserver/filters/apirequestcount/deprecated.go
+new file mode 100644
+index 00000000000..66519b98df9
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/deprecated.go
+@@ -0,0 +1,70 @@
++package apirequestcount
++
++import "k8s.io/apimachinery/pkg/runtime/schema"
++
++var deprecatedApiRemovedRelease = map[schema.GroupVersionResource]string{
++	// Kubernetes APIs
++	{Group: "apps", Version: "v1beta1", Resource: "controllerrevisions"}:                                     "1.16",
++	{Group: "apps", Version: "v1beta1", Resource: "deploymentrollbacks"}:                                     "1.16",
++	{Group: "apps", Version: "v1beta1", Resource: "deployments"}:                                             "1.16",
++	{Group: "apps", Version: "v1beta1", Resource: "scales"}:                                                  "1.16",
++	{Group: "apps", Version: "v1beta1", Resource: "statefulsets"}:                                            "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "controllerrevisions"}:                                     "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "daemonsets"}:                                              "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "deployments"}:                                             "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "replicasets"}:                                             "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "scales"}:                                                  "1.16",
++	{Group: "apps", Version: "v1beta2", Resource: "statefulsets"}:                                            "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "daemonsets"}:                                        "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "deploymentrollbacks"}:                               "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "deployments"}:                                       "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "networkpolicies"}:                                   "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "podsecuritypolicies"}:                               "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "replicasets"}:                                       "1.16",
++	{Group: "extensions", Version: "v1beta1", Resource: "scales"}:                                            "1.16",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1alpha1", Resource: "flowschemas"}:                    "1.21",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1alpha1", Resource: "prioritylevelconfigurations"}:    "1.21",
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "mutatingwebhookconfigurations"}:   "1.22",
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "validatingwebhookconfigurations"}: "1.22",
++	{Group: "apiextensions.k8s.io", Version: "v1beta1", Resource: "customresourcedefinitions"}:               "1.22",
++	{Group: "apiregistration.k8s.io", Version: "v1beta1", Resource: "apiservices"}:                           "1.22",
++	{Group: "authentication.k8s.io", Version: "v1beta1", Resource: "tokenreviews"}:                           "1.22",
++	{Group: "authorization.k8s.io", Version: "v1beta1", Resource: "localsubjectaccessreviews"}:               "1.22",
++	{Group: "authorization.k8s.io", Version: "v1beta1", Resource: "selfsubjectaccessreviews"}:                "1.22",
++	{Group: "authorization.k8s.io", Version: "v1beta1", Resource: "selfsubjectrulesreviews"}:                 "1.22",
++	{Group: "authorization.k8s.io", Version: "v1beta1", Resource: "subjectaccessreviews"}:                    "1.22",
++	{Group: "certificates.k8s.io", Version: "v1beta1", Resource: "certificatesigningrequests"}:               "1.22",
++	{Group: "coordination.k8s.io", Version: "v1beta1", Resource: "leases"}:                                   "1.22",
++	{Group: "extensions", Version: "v1beta1", Resource: "ingresses"}:                                         "1.22",
++	{Group: "networking.k8s.io", Version: "v1beta1", Resource: "ingresses"}:                                  "1.22",
++	{Group: "networking.k8s.io", Version: "v1beta1", Resource: "ingressclasses"}:                             "1.22",
++	{Group: "rbac.authorization.k8s.io", Version: "v1beta1", Resource: "clusterrolebindings"}:                "1.22",
++	{Group: "rbac.authorization.k8s.io", Version: "v1beta1", Resource: "clusterroles"}:                       "1.22",
++	{Group: "rbac.authorization.k8s.io", Version: "v1beta1", Resource: "rolebindings"}:                       "1.22",
++	{Group: "rbac.authorization.k8s.io", Version: "v1beta1", Resource: "roles"}:                              "1.22",
++	{Group: "scheduling.k8s.io", Version: "v1beta1", Resource: "priorityclasses"}:                            "1.22",
++	{Group: "storage.k8s.io", Version: "v1beta1", Resource: "csidrivers"}:                                    "1.22",
++	{Group: "storage.k8s.io", Version: "v1beta1", Resource: "csinodes"}:                                      "1.22",
++	{Group: "storage.k8s.io", Version: "v1beta1", Resource: "storageclasses"}:                                "1.22",
++	{Group: "storage.k8s.io", Version: "v1beta1", Resource: "volumeattachments"}:                             "1.22",
++	{Group: "batch", Version: "v1beta1", Resource: "cronjobs"}:                                               "1.25",
++	{Group: "discovery.k8s.io", Version: "v1beta1", Resource: "endpointslices"}:                              "1.25",
++	{Group: "events.k8s.io", Version: "v1beta1", Resource: "events"}:                                         "1.25",
++	{Group: "autoscaling", Version: "v2beta1", Resource: "horizontalpodautoscalers"}:                         "1.25",
++	{Group: "policy", Version: "v1beta1", Resource: "poddisruptionbudgets"}:                                  "1.25",
++	{Group: "policy", Version: "v1beta1", Resource: "podsecuritypolicies"}:                                   "1.25",
++	{Group: "node.k8s.io", Version: "v1beta1", Resource: "runtimeclasses"}:                                   "1.25",
++	{Group: "autoscaling", Version: "v2beta2", Resource: "horizontalpodautoscalers"}:                         "1.26",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta1", Resource: "flowschemas"}:                     "1.26",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta1", Resource: "prioritylevelconfigurations"}:     "1.26",
++	{Group: "storage.k8s.io", Version: "v1beta1", Resource: "csistoragecapacities"}:                          "1.27",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta2", Resource: "flowschemas"}:                     "1.29",
++	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta2", Resource: "prioritylevelconfigurations"}:     "1.29",
++	// OpenShift APIs
++	{Group: "operator.openshift.io", Version: "v1beta1", Resource: "kubedeschedulers"}: "1.22",
++}
++
++// removedRelease of a specified resource.version.group.
++func removedRelease(resource schema.GroupVersionResource) string {
++	return deprecatedApiRemovedRelease[resource]
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/request_counts.go b/openshift-kube-apiserver/filters/apirequestcount/request_counts.go
+new file mode 100644
+index 00000000000..3f1d88b33a0
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/request_counts.go
+@@ -0,0 +1,442 @@
++package apirequestcount
++
++import (
++	"fmt"
++	"sort"
++	"strings"
++	"sync"
++	"sync/atomic"
++
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/util/sets"
++)
++
++type clusterRequestCounts struct {
++	lock               sync.RWMutex
++	nodeToRequestCount map[string]*apiRequestCounts
++}
++
++func newClusterRequestCounts() *clusterRequestCounts {
++	return &clusterRequestCounts{
++		nodeToRequestCount: map[string]*apiRequestCounts{},
++	}
++}
++
++func (c *clusterRequestCounts) Node(nodeName string) *apiRequestCounts {
++	c.lock.RLock()
++	ret, ok := c.nodeToRequestCount[nodeName]
++	c.lock.RUnlock()
++	if ok {
++		return ret
++	}
++
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	if _, ok := c.nodeToRequestCount[nodeName]; !ok {
++		c.nodeToRequestCount[nodeName] = newAPIRequestCounts(nodeName)
++	}
++	return c.nodeToRequestCount[nodeName]
++}
++
++func (c *clusterRequestCounts) IncrementRequestCount(node string, resource schema.GroupVersionResource, hour int, user userKey, verb string, count int64) {
++	c.Node(node).IncrementRequestCount(resource, hour, user, verb, count)
++}
++
++func (c *clusterRequestCounts) String() string {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++
++	mapStrings := []string{}
++	for _, k := range sets.StringKeySet(c.nodeToRequestCount).List() {
++		mapStrings = append(mapStrings, fmt.Sprintf("%q: %v", k, c.nodeToRequestCount[k]))
++	}
++	return fmt.Sprintf("nodeToRequestCount: {%v}", strings.Join(mapStrings, ", "))
++}
++
++type apiRequestCounts struct {
++	lock                   sync.RWMutex
++	nodeName               string
++	resourceToRequestCount map[schema.GroupVersionResource]*resourceRequestCounts
++}
++
++func newAPIRequestCounts(nodeName string) *apiRequestCounts {
++	return &apiRequestCounts{
++		nodeName:               nodeName,
++		resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{},
++	}
++}
++
++func (c *apiRequestCounts) Resource(resource schema.GroupVersionResource) *resourceRequestCounts {
++	c.lock.RLock()
++	ret, ok := c.resourceToRequestCount[resource]
++	c.lock.RUnlock()
++	if ok {
++		return ret
++	}
++
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	if _, ok := c.resourceToRequestCount[resource]; !ok {
++		c.resourceToRequestCount[resource] = newResourceRequestCounts(resource)
++	}
++	return c.resourceToRequestCount[resource]
++}
++
++func (c *apiRequestCounts) Add(requestCounts *apiRequestCounts) {
++	for resource := range requestCounts.resourceToRequestCount {
++		c.Resource(resource).Add(requestCounts.Resource(resource))
++	}
++}
++
++func (c *apiRequestCounts) IncrementRequestCount(resource schema.GroupVersionResource, hour int, user userKey, verb string, count int64) {
++	c.Resource(resource).IncrementRequestCount(hour, user, verb, count)
++}
++
++func (c *apiRequestCounts) ExpireOldestCounts(expiredHour int) {
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	for _, resource := range c.resourceToRequestCount {
++		resource.ExpireOldestCounts(expiredHour)
++	}
++}
++
++func (c *apiRequestCounts) RemoveResource(resource schema.GroupVersionResource) {
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	delete(c.resourceToRequestCount, resource)
++}
++
++func (c *apiRequestCounts) Equals(rhs *apiRequestCounts) bool {
++	if c.nodeName != rhs.nodeName {
++		return false
++	}
++
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	rhs.lock.RLock()
++	defer rhs.lock.RUnlock()
++
++	if len(c.resourceToRequestCount) != len(rhs.resourceToRequestCount) {
++		return false
++	}
++
++	for k, lhsV := range c.resourceToRequestCount {
++		rhsV, ok := rhs.resourceToRequestCount[k]
++		if !ok {
++			return false
++		}
++		if !lhsV.Equals(rhsV) {
++			return false
++		}
++	}
++	return true
++}
++
++func (c *apiRequestCounts) String() string {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++
++	lookup := map[string]schema.GroupVersionResource{}
++	for k := range c.resourceToRequestCount {
++		lookup[k.String()] = k
++	}
++	mapStrings := []string{}
++	for _, k := range sets.StringKeySet(lookup).List() {
++		mapStrings = append(mapStrings, fmt.Sprintf("%q: %v", k, c.resourceToRequestCount[lookup[k]]))
++	}
++	return fmt.Sprintf("resource: %v, resourceToRequestCount: {%v}", c.resourceToRequestCount, strings.Join(mapStrings, ", "))
++}
++
++type resourceRequestCounts struct {
++	lock               sync.RWMutex
++	resource           schema.GroupVersionResource
++	hourToRequestCount map[int]*hourlyRequestCounts
++}
++
++func newResourceRequestCounts(resource schema.GroupVersionResource) *resourceRequestCounts {
++	return &resourceRequestCounts{
++		resource:           resource,
++		hourToRequestCount: map[int]*hourlyRequestCounts{},
++	}
++}
++
++func (c *resourceRequestCounts) Hour(hour int) *hourlyRequestCounts {
++	c.lock.RLock()
++	ret, ok := c.hourToRequestCount[hour]
++	c.lock.RUnlock()
++	if ok {
++		return ret
++	}
++
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	if _, ok := c.hourToRequestCount[hour]; !ok {
++		c.hourToRequestCount[hour] = newHourlyRequestCounts()
++	}
++	return c.hourToRequestCount[hour]
++}
++
++func (c *resourceRequestCounts) ExpireOldestCounts(expiredHour int) {
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	delete(c.hourToRequestCount, expiredHour)
++}
++
++func (c *resourceRequestCounts) Add(requestCounts *resourceRequestCounts) {
++	for hour, hourCount := range requestCounts.hourToRequestCount {
++		c.Hour(hour).Add(hourCount)
++	}
++}
++
++func (c *resourceRequestCounts) IncrementRequestCount(hour int, user userKey, verb string, count int64) {
++	c.Hour(hour).IncrementRequestCount(user, verb, count)
++}
++
++func (c *resourceRequestCounts) RemoveHour(hour int) {
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	delete(c.hourToRequestCount, hour)
++}
++
++func (c *resourceRequestCounts) Equals(rhs *resourceRequestCounts) bool {
++	if c.resource != rhs.resource {
++		return false
++	}
++
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	rhs.lock.RLock()
++	defer rhs.lock.RUnlock()
++
++	if len(c.hourToRequestCount) != len(rhs.hourToRequestCount) {
++		return false
++	}
++
++	for k, lhsV := range c.hourToRequestCount {
++		rhsV, ok := rhs.hourToRequestCount[k]
++		if !ok {
++			return false
++		}
++		if !lhsV.Equals(rhsV) {
++			return false
++		}
++	}
++	return true
++}
++
++func (c *resourceRequestCounts) String() string {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++
++	mapStrings := []string{}
++	for _, k := range sets.IntKeySet(c.hourToRequestCount).List() {
++		mapStrings = append(mapStrings, fmt.Sprintf("%d: %v", k, c.hourToRequestCount[k].String()))
++	}
++	return fmt.Sprintf("resource: %v, hourToRequestCount: {%v}", c.resource, strings.Join(mapStrings, ", "))
++}
++
++type hourlyRequestCounts struct {
++	lock sync.RWMutex
++	// countToSuppress is the number of requests to remove from the count to avoid double counting in persistence
++	// TODO I think I'd like this in look-aside data, but I don't see an easy way to plumb it.
++	countToSuppress      int64
++	usersToRequestCounts map[userKey]*userRequestCounts
++}
++
++func newHourlyRequestCounts() *hourlyRequestCounts {
++	return &hourlyRequestCounts{
++		usersToRequestCounts: map[userKey]*userRequestCounts{},
++	}
++}
++
++func (c *hourlyRequestCounts) User(user userKey) *userRequestCounts {
++	c.lock.RLock()
++	ret, ok := c.usersToRequestCounts[user]
++	c.lock.RUnlock()
++	if ok {
++		return ret
++	}
++
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	if _, ok := c.usersToRequestCounts[user]; !ok {
++		c.usersToRequestCounts[user] = newUserRequestCounts(user)
++	}
++	return c.usersToRequestCounts[user]
++}
++
++func (c *hourlyRequestCounts) Add(requestCounts *hourlyRequestCounts) {
++	for user, userCount := range requestCounts.usersToRequestCounts {
++		c.User(user).Add(userCount)
++	}
++	c.countToSuppress += requestCounts.countToSuppress
++}
++
++func (c *hourlyRequestCounts) IncrementRequestCount(user userKey, verb string, count int64) {
++	c.User(user).IncrementRequestCount(verb, count)
++}
++
++func (c *hourlyRequestCounts) RemoveUser(user userKey) {
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	delete(c.usersToRequestCounts, user)
++}
++
++func (c *hourlyRequestCounts) Equals(rhs *hourlyRequestCounts) bool {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	rhs.lock.RLock()
++	defer rhs.lock.RUnlock()
++
++	if c.countToSuppress != rhs.countToSuppress {
++		return false
++	}
++
++	if len(c.usersToRequestCounts) != len(rhs.usersToRequestCounts) {
++		return false
++	}
++
++	for k, lhsV := range c.usersToRequestCounts {
++		rhsV, ok := rhs.usersToRequestCounts[k]
++		if !ok {
++			return false
++		}
++		if !lhsV.Equals(rhsV) {
++			return false
++		}
++	}
++	return true
++}
++
++func (c *hourlyRequestCounts) String() string {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++
++	keys := []userKey{}
++	for k := range c.usersToRequestCounts {
++		keys = append(keys, k)
++	}
++	sort.Sort(byUserKey(keys))
++
++	mapStrings := []string{}
++	for _, k := range keys {
++		mapStrings = append(mapStrings, fmt.Sprintf("%q: %v", k, c.usersToRequestCounts[k].String()))
++	}
++	return fmt.Sprintf("countToSuppress=%d usersToRequestCounts: {%v}", c.countToSuppress, strings.Join(mapStrings, ", "))
++}
++
++type userKey struct {
++	user      string
++	userAgent string
++}
++
++type byUserKey []userKey
++
++func (s byUserKey) Len() int {
++	return len(s)
++}
++func (s byUserKey) Swap(i, j int) {
++	s[i], s[j] = s[j], s[i]
++}
++
++func (s byUserKey) Less(i, j int) bool {
++	userEquals := strings.Compare(s[i].user, s[j].user)
++	if userEquals != 0 {
++		return userEquals < 0
++	}
++	return strings.Compare(s[i].userAgent, s[j].userAgent) < 0
++}
++
++type userRequestCounts struct {
++	lock                 sync.RWMutex
++	user                 userKey
++	verbsToRequestCounts map[string]*verbRequestCount
++}
++
++func newUserRequestCounts(user userKey) *userRequestCounts {
++	return &userRequestCounts{
++		user:                 user,
++		verbsToRequestCounts: map[string]*verbRequestCount{},
++	}
++}
++
++func (c *userRequestCounts) Verb(verb string) *verbRequestCount {
++	c.lock.RLock()
++	ret, ok := c.verbsToRequestCounts[verb]
++	c.lock.RUnlock()
++	if ok {
++		return ret
++	}
++
++	c.lock.Lock()
++	defer c.lock.Unlock()
++	if _, ok := c.verbsToRequestCounts[verb]; !ok {
++		c.verbsToRequestCounts[verb] = &verbRequestCount{}
++	}
++	return c.verbsToRequestCounts[verb]
++}
++
++func (c *userRequestCounts) Add(requestCounts *userRequestCounts) {
++	for verb := range requestCounts.verbsToRequestCounts {
++		c.Verb(verb).Add(requestCounts.Verb(verb).count)
++	}
++}
++
++func (c *userRequestCounts) IncrementRequestCount(verb string, count int64) {
++	c.Verb(verb).IncrementRequestCount(count)
++}
++
++func (c *userRequestCounts) Equals(rhs *userRequestCounts) bool {
++	if c.user != rhs.user {
++		return false
++	}
++
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++	rhs.lock.RLock()
++	defer rhs.lock.RUnlock()
++
++	if len(c.verbsToRequestCounts) != len(rhs.verbsToRequestCounts) {
++		return false
++	}
++
++	for k, lhsV := range c.verbsToRequestCounts {
++		rhsV, ok := rhs.verbsToRequestCounts[k]
++		if !ok {
++			return false
++		}
++		if !lhsV.Equals(rhsV) {
++			return false
++		}
++	}
++	return true
++}
++
++func (c *userRequestCounts) String() string {
++	c.lock.RLock()
++	defer c.lock.RUnlock()
++
++	mapStrings := []string{}
++	for _, k := range sets.StringKeySet(c.verbsToRequestCounts).List() {
++		mapStrings = append(mapStrings, fmt.Sprintf("%q: %v", k, c.verbsToRequestCounts[k]))
++	}
++	return fmt.Sprintf("user: %q, userAgent: %q, verbsToRequestCounts: {%v}", c.user.user, c.user.userAgent, strings.Join(mapStrings, ", "))
++}
++
++type verbRequestCount struct {
++	count int64
++}
++
++func (c *verbRequestCount) Add(count int64) {
++	atomic.AddInt64(&c.count, count)
++}
++
++func (c *verbRequestCount) IncrementRequestCount(count int64) {
++	c.Add(count)
++}
++
++func (c *verbRequestCount) Equals(rhs *verbRequestCount) bool {
++	lhsV := atomic.LoadInt64(&c.count)
++	rhsV := atomic.LoadInt64(&rhs.count)
++	return lhsV == rhsV
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/request_counts_test.go b/openshift-kube-apiserver/filters/apirequestcount/request_counts_test.go
+new file mode 100644
+index 00000000000..dc389d8c27c
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/request_counts_test.go
+@@ -0,0 +1,294 @@
++package apirequestcount
++
++import (
++	"strings"
++	"testing"
++	"time"
++
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apimachinery/pkg/util/diff"
++)
++
++func gvr(resource string) schema.GroupVersionResource {
++	s := strings.SplitN(resource, ".", 3)
++	switch len(s) {
++	case 3:
++		return schema.GroupVersionResource{Group: s[2], Version: s[1], Resource: s[0]}
++	case 2:
++		return schema.GroupVersionResource{Version: s[1], Resource: s[0]}
++	case 1:
++		return schema.GroupVersionResource{Resource: s[0]}
++	}
++	panic(s)
++}
++
++var (
++	bobKey = userKey{
++		user:      "bob",
++		userAgent: "some-agent",
++	}
++	sueKey = userKey{
++		user:      "sue",
++		userAgent: "some-agent",
++	}
++	genericUserKey = userKey{
++		user:      "user",
++		userAgent: "some-agent",
++	}
++)
++
++func TestAPIRequestCounts_IncrementRequestCount(t *testing.T) {
++	testCases := []struct {
++		resource schema.GroupVersionResource
++		ts       time.Time
++		user     userKey
++		verb     string
++		count    int64
++	}{
++		{gvr("test.v1.group"), testTime(0, 0), bobKey, "get", 1},
++		{gvr("test.v1.group"), testTime(0, 1), bobKey, "list", 2},
++		{gvr("test.v1.group"), testTime(1, 0), bobKey, "get", 1},
++		{gvr("test.v2.group"), testTime(2, 0), bobKey, "get", 1},
++		{gvr("test.v2.group"), testTime(2, 1), sueKey, "list", 2},
++		{gvr("test.v2.group"), testTime(2, 2), sueKey, "get", 1},
++		{gvr("test.v2.group"), testTime(2, 3), sueKey, "get", 3},
++	}
++	actual := newAPIRequestCounts("nodeName")
++	for _, tc := range testCases {
++		actual.IncrementRequestCount(tc.resource, tc.ts.Hour(), tc.user, tc.verb, tc.count)
++	}
++	expected := &apiRequestCounts{
++		nodeName: "nodeName",
++		resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++			gvr("test.v1.group"): {
++				resource: gvr("test.v1.group"),
++				hourToRequestCount: map[int]*hourlyRequestCounts{
++					0: {
++						usersToRequestCounts: map[userKey]*userRequestCounts{
++							bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {count: 1}, "list": {count: 2}}},
++						}},
++					1: {
++						usersToRequestCounts: map[userKey]*userRequestCounts{
++							bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {count: 1}}},
++						},
++					},
++				}},
++			gvr("test.v2.group"): {
++				resource: gvr("test.v2.group"),
++				hourToRequestCount: map[int]*hourlyRequestCounts{
++					2: {
++						usersToRequestCounts: map[userKey]*userRequestCounts{
++							bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {count: 1}}},
++							sueKey: {user: sueKey, verbsToRequestCounts: map[string]*verbRequestCount{"list": {count: 2}, "get": {count: 4}}},
++						}},
++				}},
++		},
++	}
++
++	if !actual.Equals(expected) {
++		t.Error(diff.StringDiff(expected.String(), actual.String()))
++	}
++}
++
++func TestAPIRequestCounts_IncrementRequestCounts(t *testing.T) {
++	testCases := []struct {
++		name       string
++		existing   *apiRequestCounts
++		additional *apiRequestCounts
++		expected   *apiRequestCounts
++	}{
++		{
++			name:       "BothEmpty",
++			existing:   &apiRequestCounts{},
++			additional: &apiRequestCounts{},
++			expected:   &apiRequestCounts{},
++		},
++		{
++			name:     "TargetEmpty",
++			existing: newAPIRequestCounts(""),
++			additional: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {1}}},
++								},
++							},
++						}},
++				},
++			},
++			expected: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {1}}},
++								},
++							},
++						}},
++				},
++			},
++		},
++		{
++			name: "SourceEmpty",
++			existing: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {1}}},
++								},
++							},
++						}},
++				},
++			},
++			additional: &apiRequestCounts{resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{}},
++			expected: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {1}}},
++								},
++							},
++						}},
++				},
++			},
++		},
++		{
++			name: "MergeCount",
++			existing: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {1}}},
++								},
++							},
++						}},
++				},
++			},
++			additional: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {2}}},
++								},
++							},
++						}},
++				},
++			},
++			expected: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.."): {
++						resource: gvr("resource"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"verb": {3}}},
++								},
++							},
++						}},
++				},
++			},
++		},
++		{
++			name: "Merge",
++			existing: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.v1."): {
++						resource: gvr("resource.v1"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {1}}},
++								},
++							},
++						}},
++				},
++			},
++			additional: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.v1."): {
++						resource: gvr("resource.v1"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {2}, "post": {1}}},
++									sueKey: {user: sueKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {5}}},
++								},
++							},
++							2: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {1}}},
++								},
++							},
++						}},
++					gvr("resource.v2."): {
++						resource: gvr("resource.v2"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {1}}},
++								},
++							},
++						}},
++				},
++			},
++			expected: &apiRequestCounts{
++				resourceToRequestCount: map[schema.GroupVersionResource]*resourceRequestCounts{
++					gvr("resource.v1."): {
++						resource: gvr("resource.v1"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {3}, "post": {1}}},
++									sueKey: {user: sueKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {5}}},
++								},
++							},
++							2: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									bobKey: {user: bobKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {1}}},
++								},
++							},
++						}},
++					gvr("resource.v2."): {
++						resource: gvr("resource.v2"),
++						hourToRequestCount: map[int]*hourlyRequestCounts{
++							0: {
++								usersToRequestCounts: map[userKey]*userRequestCounts{
++									genericUserKey: {user: genericUserKey, verbsToRequestCounts: map[string]*verbRequestCount{"get": {1}}},
++								},
++							},
++						}},
++				},
++			},
++		},
++	}
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			tc.existing.Add(tc.additional)
++
++			if !tc.existing.Equals(tc.expected) {
++				t.Error(diff.StringDiff(tc.expected.String(), tc.existing.String()))
++			}
++		})
++	}
++}
++
++func testTime(h, m int) time.Time {
++	return time.Date(1974, 9, 18, 0+h, 0+m, 0, 0, time.UTC)
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/update_func.go b/openshift-kube-apiserver/filters/apirequestcount/update_func.go
+new file mode 100644
+index 00000000000..b0565ffc964
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/update_func.go
+@@ -0,0 +1,213 @@
++package apirequestcount
++
++import (
++	"sort"
++	"strings"
++
++	apiv1 "github.com/openshift/api/apiserver/v1"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/kubernetes/openshift-kube-apiserver/filters/apirequestcount/v1helpers"
++)
++
++// SetRequestCountsForNode add additional api request counts to the log.
++// countsToPersist must not be mutated
++func SetRequestCountsForNode(nodeName string, currentHour, expiredHour int, countsToPersist *resourceRequestCounts) v1helpers.UpdateStatusFunc {
++	return func(maxNumUsers int, status *apiv1.APIRequestCountStatus) {
++		existingLogsFromAPI := apiStatusToRequestCount(countsToPersist.resource, status)
++		existingNodeLogFromAPI := existingLogsFromAPI.Node(nodeName)
++		existingNodeLogFromAPI.ExpireOldestCounts(expiredHour)
++
++		// updatedCounts is an alias so we recognize this, but it is based on the newly computed struct so we don't destroy
++		// our input data.
++		updatedCounts := existingNodeLogFromAPI.Resource(countsToPersist.resource)
++		updatedCounts.Add(countsToPersist)
++		hourlyRequestLogs := resourceRequestCountToHourlyNodeRequestLog(nodeName, maxNumUsers, updatedCounts)
++
++		newStatus := setRequestCountsForNode(status, nodeName, currentHour, expiredHour, hourlyRequestLogs)
++		status.Last24h = newStatus.Last24h
++		status.CurrentHour = newStatus.CurrentHour
++		status.RemovedInRelease = removedRelease(countsToPersist.resource)
++		status.RequestCount = newStatus.RequestCount
++	}
++}
++
++func nodeStatusDefaulter(nodeName string, currentHour, expiredHour int, resource schema.GroupVersionResource) v1helpers.UpdateStatusFunc {
++	return SetRequestCountsForNode(nodeName, currentHour, expiredHour, newResourceRequestCounts(resource))
++}
++
++func setRequestCountsForNode(status *apiv1.APIRequestCountStatus, nodeName string, currentHour, expiredHour int, hourlyNodeRequests []apiv1.PerNodeAPIRequestLog) *apiv1.APIRequestCountStatus {
++	newStatus := status.DeepCopy()
++	newStatus.Last24h = []apiv1.PerResourceAPIRequestLog{}
++	newStatus.CurrentHour = apiv1.PerResourceAPIRequestLog{}
++
++	for hour, currentNodeCount := range hourlyNodeRequests {
++		totalRequestThisHour := int64(0)
++		nextHourStatus := apiv1.PerResourceAPIRequestLog{}
++		if hour == expiredHour {
++			newStatus.Last24h = append(newStatus.Last24h, nextHourStatus)
++			continue
++		}
++		if len(status.Last24h) > hour {
++			for _, oldNodeStatus := range status.Last24h[hour].ByNode {
++				if oldNodeStatus.NodeName == nodeName {
++					continue
++				}
++				totalRequestThisHour += oldNodeStatus.RequestCount
++				nextHourStatus.ByNode = append(nextHourStatus.ByNode, *oldNodeStatus.DeepCopy())
++			}
++		}
++		nextHourStatus.ByNode = append(nextHourStatus.ByNode, currentNodeCount)
++		totalRequestThisHour += currentNodeCount.RequestCount
++		nextHourStatus.RequestCount = totalRequestThisHour
++
++		newStatus.Last24h = append(newStatus.Last24h, nextHourStatus)
++	}
++
++	totalRequestsThisDay := int64(0)
++	for _, hourCount := range newStatus.Last24h {
++		totalRequestsThisDay += hourCount.RequestCount
++	}
++	newStatus.RequestCount = totalRequestsThisDay
++
++	// get all our sorting before copying
++	canonicalizeStatus(newStatus)
++	newStatus.CurrentHour = newStatus.Last24h[currentHour]
++
++	return newStatus
++}
++
++// in this function we have exclusive access to resourceRequestCounts, so do the easy map navigation
++func resourceRequestCountToHourlyNodeRequestLog(nodeName string, maxNumUsers int, resourceRequestCounts *resourceRequestCounts) []apiv1.PerNodeAPIRequestLog {
++	hourlyNodeRequests := []apiv1.PerNodeAPIRequestLog{}
++	for i := 0; i < 24; i++ {
++		hourlyNodeRequests = append(hourlyNodeRequests,
++			apiv1.PerNodeAPIRequestLog{
++				NodeName: nodeName,
++				ByUser:   nil,
++			},
++		)
++	}
++
++	for hour, hourlyCount := range resourceRequestCounts.hourToRequestCount {
++		// be sure to suppress the "extra" added back into memory so we don't double count requests
++		totalRequestsThisHour := int64(0) - hourlyCount.countToSuppress
++		for userKey, userCount := range hourlyCount.usersToRequestCounts {
++			apiUserStatus := apiv1.PerUserAPIRequestCount{
++				UserName:     userKey.user,
++				UserAgent:    userKey.userAgent,
++				RequestCount: 0,
++				ByVerb:       nil,
++			}
++			totalCount := int64(0)
++			for verb, verbCount := range userCount.verbsToRequestCounts {
++				totalCount += verbCount.count
++				apiUserStatus.ByVerb = append(apiUserStatus.ByVerb,
++					apiv1.PerVerbAPIRequestCount{
++						Verb:         verb,
++						RequestCount: verbCount.count,
++					})
++			}
++			apiUserStatus.RequestCount = totalCount
++			totalRequestsThisHour += totalCount
++
++			// the api resource has an interesting property of only keeping the last few.  Having a short list makes the sort faster
++			hasMaxEntries := len(hourlyNodeRequests[hour].ByUser) >= maxNumUsers
++			if hasMaxEntries {
++				// users are expected to be sorted by decending request count
++				currentSmallestCountIndex := len(hourlyNodeRequests[hour].ByUser) - 1
++				currentSmallestCount := hourlyNodeRequests[hour].ByUser[currentSmallestCountIndex].RequestCount
++				if apiUserStatus.RequestCount <= currentSmallestCount {
++					// not in top numberOfUsersToReport
++					continue
++				}
++				// drop smallest user request count to make room
++				hourlyNodeRequests[hour].ByUser = hourlyNodeRequests[hour].ByUser[:currentSmallestCountIndex]
++			}
++
++			hourlyNodeRequests[hour].ByUser = append(hourlyNodeRequests[hour].ByUser, apiUserStatus)
++			sort.Stable(sort.Reverse(byNumberOfUserRequests(hourlyNodeRequests[hour].ByUser)))
++		}
++		hourlyNodeRequests[hour].RequestCount = totalRequestsThisHour
++	}
++
++	return hourlyNodeRequests
++}
++
++func apiStatusToRequestCount(resource schema.GroupVersionResource, status *apiv1.APIRequestCountStatus) *clusterRequestCounts {
++	requestCount := newClusterRequestCounts()
++	for hour, hourlyCount := range status.Last24h {
++		for _, hourlyNodeCount := range hourlyCount.ByNode {
++			for _, hourNodeUserCount := range hourlyNodeCount.ByUser {
++				for _, hourlyNodeUserVerbCount := range hourNodeUserCount.ByVerb {
++					requestCount.IncrementRequestCount(
++						hourlyNodeCount.NodeName,
++						resource,
++						hour,
++						userKey{
++							user:      hourNodeUserCount.UserName,
++							userAgent: hourNodeUserCount.UserAgent,
++						},
++						hourlyNodeUserVerbCount.Verb,
++						hourlyNodeUserVerbCount.RequestCount,
++					)
++				}
++			}
++		}
++	}
++	return requestCount
++}
++
++func canonicalizeStatus(status *apiv1.APIRequestCountStatus) {
++	for hour := range status.Last24h {
++		hourlyCount := status.Last24h[hour]
++		for j := range hourlyCount.ByNode {
++			nodeCount := hourlyCount.ByNode[j]
++			for k := range nodeCount.ByUser {
++				userCount := nodeCount.ByUser[k]
++				sort.Stable(byVerb(userCount.ByVerb))
++			}
++			sort.Stable(sort.Reverse(byNumberOfUserRequests(nodeCount.ByUser)))
++		}
++		sort.Stable(byNode(status.Last24h[hour].ByNode))
++	}
++
++}
++
++type byVerb []apiv1.PerVerbAPIRequestCount
++
++func (s byVerb) Len() int {
++	return len(s)
++}
++func (s byVerb) Swap(i, j int) {
++	s[i], s[j] = s[j], s[i]
++}
++
++func (s byVerb) Less(i, j int) bool {
++	return strings.Compare(s[i].Verb, s[j].Verb) < 0
++}
++
++type byNode []apiv1.PerNodeAPIRequestLog
++
++func (s byNode) Len() int {
++	return len(s)
++}
++func (s byNode) Swap(i, j int) {
++	s[i], s[j] = s[j], s[i]
++}
++
++func (s byNode) Less(i, j int) bool {
++	return strings.Compare(s[i].NodeName, s[j].NodeName) < 0
++}
++
++type byNumberOfUserRequests []apiv1.PerUserAPIRequestCount
++
++func (s byNumberOfUserRequests) Len() int {
++	return len(s)
++}
++func (s byNumberOfUserRequests) Swap(i, j int) {
++	s[i], s[j] = s[j], s[i]
++}
++
++func (s byNumberOfUserRequests) Less(i, j int) bool {
++	return s[i].RequestCount < s[j].RequestCount
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/v1helpers/helpers.go b/openshift-kube-apiserver/filters/apirequestcount/v1helpers/helpers.go
+new file mode 100644
+index 00000000000..e5ebd7bc625
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount/v1helpers/helpers.go
+@@ -0,0 +1,71 @@
++package v1helpers
++
++import (
++	"context"
++
++	apiv1 "github.com/openshift/api/apiserver/v1"
++	apiv1client "github.com/openshift/client-go/apiserver/clientset/versioned/typed/apiserver/v1"
++	"k8s.io/apimachinery/pkg/api/equality"
++	"k8s.io/apimachinery/pkg/api/errors"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/client-go/util/retry"
++)
++
++type UpdateStatusFunc func(maxNumUsers int, status *apiv1.APIRequestCountStatus)
++
++func ApplyStatus(ctx context.Context, client apiv1client.APIRequestCountInterface, name string, statusDefaulter UpdateStatusFunc, updateFuncs ...UpdateStatusFunc) (*apiv1.APIRequestCountStatus, bool, error) {
++	updated := false
++	var updatedStatus *apiv1.APIRequestCountStatus
++	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
++		existingOrDefaultAPIRequestCount, err := client.Get(ctx, name, metav1.GetOptions{})
++		if errors.IsNotFound(err) {
++			// APIRequestCount might have been purposely deleted. We will
++			// try to create it again further below if there is a need to.
++			existingOrDefaultAPIRequestCount = &apiv1.APIRequestCount{
++				ObjectMeta: metav1.ObjectMeta{Name: name},
++				Spec:       apiv1.APIRequestCountSpec{NumberOfUsersToReport: 10},
++			}
++			// make sure the status doesn't result in a diff on a no-op.
++			statusDefaulter(10, &existingOrDefaultAPIRequestCount.Status)
++		} else if err != nil {
++			return err
++		}
++		oldStatus := existingOrDefaultAPIRequestCount.Status
++		newStatus := oldStatus.DeepCopy()
++		for _, update := range updateFuncs {
++			update(int(existingOrDefaultAPIRequestCount.Spec.NumberOfUsersToReport), newStatus)
++		}
++		if equality.Semantic.DeepEqual(&oldStatus, newStatus) {
++			updatedStatus = newStatus
++			return nil
++		}
++
++		// At this point the status has been semantically changed by the updateFuncs,
++		// possibly due to new requests, hourly log expiration, and so on.
++
++		existingAPIRequestCount, err := client.Get(ctx, name, metav1.GetOptions{})
++		if errors.IsNotFound(err) {
++			// APIRequestCount might have been purposely deleted, but new requests
++			// have come in, so let's re-create the APIRequestCount resource.
++			newAPIRequestCount := &apiv1.APIRequestCount{
++				ObjectMeta: metav1.ObjectMeta{Name: name},
++				Spec: apiv1.APIRequestCountSpec{
++					NumberOfUsersToReport: 10,
++				},
++			}
++			existingAPIRequestCount, err = client.Create(ctx, newAPIRequestCount, metav1.CreateOptions{})
++		}
++		if err != nil {
++			return err
++		}
++		existingAPIRequestCount.Status = *newStatus
++		updatedAPIRequestCount, err := client.UpdateStatus(ctx, existingAPIRequestCount, metav1.UpdateOptions{})
++		if err != nil {
++			return err
++		}
++		updatedStatus = &updatedAPIRequestCount.Status
++		updated = true
++		return err
++	})
++	return updatedStatus, updated, err
++}
+diff --git a/openshift-kube-apiserver/filters/apirequestcount_filter.go b/openshift-kube-apiserver/filters/apirequestcount_filter.go
+new file mode 100644
+index 00000000000..12d1606d6fa
+--- /dev/null
++++ b/openshift-kube-apiserver/filters/apirequestcount_filter.go
+@@ -0,0 +1,40 @@
++package filters
++
++import (
++	"net/http"
++
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apiserver/pkg/endpoints/request"
++	"k8s.io/kubernetes/openshift-kube-apiserver/filters/apirequestcount"
++)
++
++// WithAPIRequestCountLogging adds a handler that logs counts of api requests.
++func WithAPIRequestCountLogging(handler http.Handler, requestLogger apirequestcount.APIRequestLogger) http.Handler {
++	handlerFunc := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
++		defer handler.ServeHTTP(w, req)
++		info, ok := request.RequestInfoFrom(req.Context())
++		if !ok || !info.IsResourceRequest {
++			return
++		}
++		timestamp, ok := request.ReceivedTimestampFrom(req.Context())
++		if !ok {
++			return
++		}
++		user, ok := request.UserFrom(req.Context())
++		if !ok {
++			return
++		}
++		requestLogger.LogRequest(
++			schema.GroupVersionResource{
++				Group:    info.APIGroup,
++				Version:  info.APIVersion,
++				Resource: info.Resource,
++			},
++			timestamp,
++			user.GetName(),
++			req.UserAgent(),
++			info.Verb,
++		)
++	})
++	return handlerFunc
++}
+diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+index 9fd2b00659a..3a2008b8928 100644
+--- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
++++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
+@@ -1,23 +1,14 @@
+ package openshiftkubeapiserver
+ 
+ import (
++	"os"
+ 	"time"
+ 
+-	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
+-
+-	"k8s.io/apiserver/pkg/admission"
+-	"k8s.io/apiserver/pkg/quota/v1/generic"
+-	genericapiserver "k8s.io/apiserver/pkg/server"
+-	clientgoinformers "k8s.io/client-go/informers"
+-	corev1informers "k8s.io/client-go/informers/core/v1"
+-	"k8s.io/client-go/rest"
+-	"k8s.io/client-go/tools/cache"
+-	"k8s.io/kubernetes/pkg/quota/v1/install"
+-
+ 	"github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy"
+ 	"github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy/imagereferencemutators"
+ 	"github.com/openshift/apiserver-library-go/pkg/admission/quota/clusterresourcequota"
+ 	"github.com/openshift/apiserver-library-go/pkg/securitycontextconstraints/sccadmission"
++	apiclientv1 "github.com/openshift/client-go/apiserver/clientset/versioned/typed/apiserver/v1"
+ 	configclient "github.com/openshift/client-go/config/clientset/versioned"
+ 	configv1informer "github.com/openshift/client-go/config/informers/externalversions"
+ 	quotaclient "github.com/openshift/client-go/quota/clientset/versioned"
+@@ -30,11 +21,21 @@ import (
+ 	"github.com/openshift/library-go/pkg/apiserver/admission/admissionrestconfig"
+ 	"github.com/openshift/library-go/pkg/apiserver/apiserverconfig"
+ 	"github.com/openshift/library-go/pkg/quota/clusterquotamapping"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/quota/v1/generic"
++	genericapiserver "k8s.io/apiserver/pkg/server"
++	clientgoinformers "k8s.io/client-go/informers"
++	corev1informers "k8s.io/client-go/informers/core/v1"
++	"k8s.io/client-go/rest"
++	"k8s.io/client-go/tools/cache"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/authorization/restrictusers"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/authorization/restrictusers/usercache"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managednode"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride"
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/scheduler/nodeenv"
++	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
++	"k8s.io/kubernetes/openshift-kube-apiserver/filters/apirequestcount"
++	"k8s.io/kubernetes/pkg/quota/v1/install"
+ 
+ 	// magnet to get authorizer package in hack/update-vendor.sh
+ 	_ "github.com/openshift/library-go/pkg/authorization/hardcodedauthorizer"
+@@ -82,7 +83,20 @@ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, k
+ 	// END ADMISSION
+ 
+ 	// HANDLER CHAIN (with oauth server and web console)
+-	genericConfig.BuildHandlerChainFunc, err = BuildHandlerChain(enablement.OpenshiftConfig().ConsolePublicURL, enablement.OpenshiftConfig().AuthConfig.OAuthMetadataFile)
++	apiserverClient, err := apiclientv1.NewForConfig(makeJSONRESTConfig(genericConfig.LoopbackClientConfig))
++	if err != nil {
++		return err
++	}
++	apiRequestCountController := apirequestcount.NewController(apiserverClient.APIRequestCounts(), nodeFor())
++	genericConfig.AddPostStartHook("openshift.io-api-request-count-filter", func(context genericapiserver.PostStartHookContext) error {
++		go apiRequestCountController.Start(context.StopCh)
++		return nil
++	})
++	genericConfig.BuildHandlerChainFunc, err = BuildHandlerChain(
++		enablement.OpenshiftConfig().ConsolePublicURL,
++		enablement.OpenshiftConfig().AuthConfig.OAuthMetadataFile,
++		apiRequestCountController,
++	)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -109,12 +123,25 @@ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, k
+ 	return nil
+ }
+ 
++func makeJSONRESTConfig(config *rest.Config) *rest.Config {
++	c := rest.CopyConfig(config)
++	c.AcceptContentTypes = "application/json"
++	c.ContentType = "application/json"
++	return c
++}
++
++func nodeFor() string {
++	node := os.Getenv("HOST_IP")
++	if hostname, err := os.Hostname(); err != nil {
++		node = hostname
++	}
++	return node
++}
++
+ // newInformers is only exposed for the build's integration testing until it can be fixed more appropriately.
+ func newInformers(loopbackClientConfig *rest.Config) (*kubeAPIServerInformers, error) {
+ 	// ClusterResourceQuota is served using CRD resource any status update must use JSON
+-	jsonLoopbackClientConfig := rest.CopyConfig(loopbackClientConfig)
+-	jsonLoopbackClientConfig.ContentConfig.AcceptContentTypes = "application/json"
+-	jsonLoopbackClientConfig.ContentConfig.ContentType = "application/json"
++	jsonLoopbackClientConfig := makeJSONRESTConfig(loopbackClientConfig)
+ 
+ 	quotaClient, err := quotaclient.NewForConfig(jsonLoopbackClientConfig)
+ 	if err != nil {
+diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch_handlerchain.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch_handlerchain.go
+index 804116c1efa..e7a2dd2afcb 100644
+--- a/openshift-kube-apiserver/openshiftkubeapiserver/patch_handlerchain.go
++++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch_handlerchain.go
+@@ -6,13 +6,15 @@ import (
+ 
+ 	authenticationv1 "k8s.io/api/authentication/v1"
+ 	genericapiserver "k8s.io/apiserver/pkg/server"
++	patchfilters "k8s.io/kubernetes/openshift-kube-apiserver/filters"
++	"k8s.io/kubernetes/openshift-kube-apiserver/filters/apirequestcount"
+ 
+ 	authorizationv1 "github.com/openshift/api/authorization/v1"
+ 	"github.com/openshift/library-go/pkg/apiserver/httprequest"
+ )
+ 
+ // TODO switch back to taking a kubeapiserver config.  For now make it obviously safe for 3.11
+-func BuildHandlerChain(consolePublicURL string, oauthMetadataFile string) (func(apiHandler http.Handler, kc *genericapiserver.Config) http.Handler, error) {
++func BuildHandlerChain(consolePublicURL string, oauthMetadataFile string, requestLogger apirequestcount.APIRequestLogger) (func(apiHandler http.Handler, kc *genericapiserver.Config) http.Handler, error) {
+ 	// load the oauthmetadata when we can return an error
+ 	oAuthMetadata := []byte{}
+ 	if len(oauthMetadataFile) > 0 {
+@@ -27,6 +29,9 @@ func BuildHandlerChain(consolePublicURL string, oauthMetadataFile string) (func(
+ 			// well-known comes after the normal handling chain. This shows where to connect for oauth information
+ 			handler := withOAuthInfo(apiHandler, oAuthMetadata)
+ 
++			// after normal chain, so that user is in context
++			handler = patchfilters.WithAPIRequestCountLogging(handler, requestLogger)
++
+ 			// this is the normal kube handler chain
+ 			handler = genericapiserver.DefaultBuildHandlerChain(handler, genericConfig)
+ 
+@@ -38,6 +43,7 @@ func BuildHandlerChain(consolePublicURL string, oauthMetadataFile string) (func(
+ 
+ 			return handler
+ 		},
++
+ 		nil
+ }
+ 
+-- 
+2.46.0
+

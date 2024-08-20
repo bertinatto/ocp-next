@@ -1,0 +1,88 @@
+From 31b11fa6acf31298a35730ad0e8b1a09852bf4ce Mon Sep 17 00:00:00 2001
+From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
+Date: Thu, 29 Oct 2020 13:55:59 +0100
+Subject: [PATCH] UPSTREAM: <carry>: Remove excessive e2e logging
+
+UPSTREAM: <carry>: Remove a redundant output in the tests
+
+This line is not necessary for our test usage and should not be an
+issue in OpenShift (openshift-tests already verifies this correctly).
+
+UPSTREAM: <carry>: Remove excessive logging during e2e upgrade test
+
+This line makes the upgrade log output unreadable and provides
+no value during the set of tests it's used in:
+
+```
+Jan 12 20:49:25.628: INFO: cluster upgrade is Progressing: Working towards registry.svc.ci.openshift.org/ci-op-jbtg7jjb/release@sha256:144e73d125cce620bdf099be9a85225ade489a95622a70075d264ea3ff79219c: downloading update
+Jan 12 20:49:26.692: INFO: Poke("http://a74e3476115ce4d2d817a1e5ea608dad-802917831.us-east-1.elb.amazonaws.com:80/echo?msg=hello"): success
+Jan 12 20:49:28.727: INFO: Poke("http://a74e3476115ce4d2d817a1e5ea608dad-802917831.us-east-1.elb.amazonaws.com:80/echo?msg=hello"): success
+```
+
+OpenShift-Rebase-Source: 8e732985579
+---
+ .../e2e/framework/internal/unittests/cleanup/cleanup_test.go | 1 -
+ test/e2e/framework/network/utils.go                          | 5 ++---
+ test/e2e/framework/util.go                                   | 4 ++--
+ 3 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go b/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
+index a0a2059b6bb..4cac4ed3a00 100644
+--- a/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
++++ b/test/e2e/framework/internal/unittests/cleanup/cleanup_test.go
+@@ -120,7 +120,6 @@ const (
+ < Exit [BeforeEach] e2e - cleanup_test.go:63 <time>
+ > Enter [BeforeEach] e2e - set up framework | framework.go:xxx <time>
+ STEP: Creating a kubernetes client - framework.go:xxx <time>
+-<klog> util.go:xxx] >>> kubeConfig: yyy/kube.config
+ STEP: Building a namespace api object, basename test-namespace - framework.go:xxx <time>
+ <klog> framework.go:xxx] Skipping waiting for service account
+ < Exit [BeforeEach] e2e - set up framework | framework.go:xxx <time>
+diff --git a/test/e2e/framework/network/utils.go b/test/e2e/framework/network/utils.go
+index 2e8fb196c84..5627856ac32 100644
+--- a/test/e2e/framework/network/utils.go
++++ b/test/e2e/framework/network/utils.go
+@@ -1027,8 +1027,6 @@ func PokeHTTP(host string, port int, path string, params *HTTPPokeParams) HTTPPo
+ 		params.Timeout = 10 * time.Second
+ 	}
+ 
+-	framework.Logf("Poking %q", url)
+-
+ 	resp, err := httpGetNoConnectionPoolTimeout(url, params.Timeout)
+ 	if err != nil {
+ 		ret.Error = err
+@@ -1080,7 +1078,8 @@ func PokeHTTP(host string, port int, path string, params *HTTPPokeParams) HTTPPo
+ 	}
+ 
+ 	ret.Status = HTTPSuccess
+-	framework.Logf("Poke(%q): success", url)
++	// causes excessive logging that provides no value
++	// framework.Logf("Poke(%q): success", url)
+ 	return ret
+ }
+ 
+diff --git a/test/e2e/framework/util.go b/test/e2e/framework/util.go
+index a3eb8a39ac9..b79c507c803 100644
+--- a/test/e2e/framework/util.go
++++ b/test/e2e/framework/util.go
+@@ -496,7 +496,7 @@ func countEndpointsSlicesNum(epList *discoveryv1.EndpointSliceList, addressType
+ 
+ // restclientConfig returns a config holds the information needed to build connection to kubernetes clusters.
+ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
+-	Logf(">>> kubeConfig: %s", TestContext.KubeConfig)
++	//Logf(">>> kubeConfig: %s", TestContext.KubeConfig)
+ 	if TestContext.KubeConfig == "" {
+ 		return nil, fmt.Errorf("KubeConfig must be specified to load client config")
+ 	}
+@@ -505,7 +505,7 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
+ 		return nil, fmt.Errorf("error loading KubeConfig: %v", err.Error())
+ 	}
+ 	if kubeContext != "" {
+-		Logf(">>> kubeContext: %s", kubeContext)
++		//Logf(">>> kubeContext: %s", kubeContext)
+ 		c.CurrentContext = kubeContext
+ 	}
+ 	return c, nil
+-- 
+2.46.0
+

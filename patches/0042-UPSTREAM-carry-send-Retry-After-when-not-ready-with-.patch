@@ -1,0 +1,96 @@
+From 7b5a38b1ee37b56d98857f633fa9d8f4ebc41bce Mon Sep 17 00:00:00 2001
+From: Abu Kashem <akashem@redhat.com>
+Date: Wed, 25 Aug 2021 16:13:46 -0400
+Subject: [PATCH] UPSTREAM: <carry>: send Retry-After when not ready with a
+ caller opt in
+
+UPSTREAM: <carry>: change opt-in due to upstream revert
+
+OpenShift-Rebase-Source: cd08005d72d
+---
+ .../src/k8s.io/apiserver/pkg/server/config.go |  1 +
+ .../pkg/server/filters/patch_optin_retry.go   | 40 +++++++++++++++++++
+ .../apiserver/pkg/server/patch_config.go      | 11 +++++
+ 3 files changed, 52 insertions(+)
+ create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/patch_optin_retry.go
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
+index 89288da8b54..0a8fa06b6b2 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/config.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
+@@ -1097,6 +1097,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+ 	if c.ShutdownSendRetryAfter {
+ 		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
+ 	}
++	handler = genericfilters.WithOptInRetryAfter(handler, c.newServerFullyInitializedFunc())
+ 	handler = genericfilters.WithHTTPLogging(handler, c.newIsTerminatingFunc())
+ 	if c.FeatureGate.Enabled(genericfeatures.APIServerTracing) {
+ 		handler = genericapifilters.WithTracing(handler, c.TracerProvider)
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/filters/patch_optin_retry.go b/staging/src/k8s.io/apiserver/pkg/server/filters/patch_optin_retry.go
+new file mode 100644
+index 00000000000..88cdaabbeaf
+--- /dev/null
++++ b/staging/src/k8s.io/apiserver/pkg/server/filters/patch_optin_retry.go
+@@ -0,0 +1,40 @@
++/*
++Copyright 2021 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package filters
++
++import (
++	"net/http"
++)
++
++func WithOptInRetryAfter(handler http.Handler, initializedFn func() bool) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
++		var retryAfter bool
++		if value := req.Header.Get("X-OpenShift-Internal-If-Not-Ready"); value == "reject" {
++			// the caller opted in for the request to be rejected if the server is not ready
++			retryAfter = !initializedFn()
++		}
++
++		if !retryAfter {
++			handler.ServeHTTP(w, req)
++			return
++		}
++
++		// Return a 429 status asking the client to try again after 5 seconds
++		w.Header().Set("Retry-After", "5")
++		http.Error(w, "The apiserver hasn't been fully initialized yet, please try again later.", http.StatusTooManyRequests)
++	})
++}
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/patch_config.go b/staging/src/k8s.io/apiserver/pkg/server/patch_config.go
+index 13fca93d6ca..0324b3f5b4b 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/patch_config.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/patch_config.go
+@@ -37,3 +37,14 @@ func (c *Config) newIsTerminatingFunc() func() bool {
+ 		}
+ 	}
+ }
++
++func (c *Config) newServerFullyInitializedFunc() func() bool {
++	return func() bool {
++		select {
++		case <-c.lifecycleSignals.HasBeenReady.Signaled():
++			return true
++		default:
++			return false
++		}
++	}
++}
+-- 
+2.46.0
+

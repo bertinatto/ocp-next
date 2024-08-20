@@ -1,0 +1,29 @@
+From 72fe51a097a7c525f7c61ed2b635948520695843 Mon Sep 17 00:00:00 2001
+From: Michal Fojtik <mfojtik@redhat.com>
+Date: Thu, 29 Oct 2020 13:55:55 +0100
+Subject: [PATCH] UPSTREAM: <carry>: remove apiservice from sync in CRD
+ registration when it exists
+
+OpenShift-Rebase-Source: 1a1d4697232
+---
+ .../controller/crdregistration/crdregistration_controller.go  | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/pkg/controlplane/controller/crdregistration/crdregistration_controller.go b/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
+index 8cd7a7c8bb7..f1410fd3031 100644
+--- a/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
++++ b/pkg/controlplane/controller/crdregistration/crdregistration_controller.go
+@@ -198,6 +198,10 @@ func (c *crdRegistrationController) handleVersionUpdate(groupVersion schema.Grou
+ 	apiServiceName := groupVersion.Version + "." + groupVersion.Group
+ 
+ 	if apiserver.APIServiceAlreadyExists(groupVersion) {
++		// Removing APIService from sync means the CRD registration controller won't sync this APIService
++		// anymore. If the APIService is managed externally, this will mean the external component can
++		// update this APIService without CRD controller stomping the changes on it.
++		c.apiServiceRegistration.RemoveAPIServiceToSync(apiServiceName)
+ 		return nil
+ 	}
+ 
+-- 
+2.46.0
+

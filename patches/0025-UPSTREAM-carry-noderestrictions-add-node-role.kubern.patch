@@ -1,0 +1,135 @@
+From cdbdec9bc69bdade580112138d12fef5132bcaa6 Mon Sep 17 00:00:00 2001
+From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
+Date: Thu, 29 Oct 2020 13:56:01 +0100
+Subject: [PATCH] UPSTREAM: <carry>: noderestrictions: add
+ node-role.kubernetes.io/* to allowed node labels
+
+Server side validation of node labels was added in https://github.com/kubernetes/kubernetes/pull/90307. We only disabled kubelet-side validation before to make our node role labels work.
+
+UPSTREAM: <carry>: add control plane to allow roles
+
+OpenShift-Rebase-Source: 38bfed34a3b
+OpenShift-Rebase-Source: aff4434f177
+
+UPSTREAM: <carry>: Do not allow nodes to set forbidden openshift labels
+
+Signed-off-by: Harshal Patil <harpatil@redhat.com>
+---
+ cmd/kubelet/app/options/options.go            |  3 ++
+ .../admission/noderestriction/admission.go    | 12 ++++--
+ .../pkg/apis/well_known_openshift_labels.go   | 43 +++++++++++++++++++
+ 3 files changed, 55 insertions(+), 3 deletions(-)
+ create mode 100644 staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
+
+diff --git a/cmd/kubelet/app/options/options.go b/cmd/kubelet/app/options/options.go
+index 7102e6bade8..a88b3ae14bb 100644
+--- a/cmd/kubelet/app/options/options.go
++++ b/cmd/kubelet/app/options/options.go
+@@ -155,6 +155,9 @@ func ValidateKubeletFlags(f *KubeletFlags) error {
+ 	invalidLabelErrs := make(map[string][]string)
+ 	for k, v := range f.NodeLabels {
+ 		if isKubernetesLabel(k) && !kubeletapis.IsKubeletLabel(k) {
++			if kubeletapis.IsForbiddenOpenshiftLabel(k) {
++				continue
++			}
+ 			unknownLabels.Insert(k)
+ 		}
+ 
+diff --git a/plugin/pkg/admission/noderestriction/admission.go b/plugin/pkg/admission/noderestriction/admission.go
+index 25e4322e660..bd313cf0c23 100644
+--- a/plugin/pkg/admission/noderestriction/admission.go
++++ b/plugin/pkg/admission/noderestriction/admission.go
+@@ -461,7 +461,7 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
+ 		// Don't allow a node to register with labels outside the allowed set.
+ 		// This would allow a node to add or modify its labels in a way that would let it steer privileged workloads to itself.
+ 		modifiedLabels := getModifiedLabels(node.Labels, nil)
+-		if forbiddenLabels := p.getForbiddenLabels(modifiedLabels); len(forbiddenLabels) > 0 {
++		if forbiddenLabels := p.getForbiddenLabels(modifiedLabels, a.GetOperation()); len(forbiddenLabels) > 0 {
+ 			return admission.NewForbidden(a, fmt.Errorf("node %q is not allowed to set the following labels: %s", nodeName, strings.Join(forbiddenLabels.List(), ", ")))
+ 		}
+ 	}
+@@ -492,9 +492,10 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
+ 		// Don't allow a node to update labels outside the allowed set.
+ 		// This would allow a node to add or modify its labels in a way that would let it steer privileged workloads to itself.
+ 		modifiedLabels := getModifiedLabels(node.Labels, oldNode.Labels)
+-		if forbiddenUpdateLabels := p.getForbiddenLabels(modifiedLabels); len(forbiddenUpdateLabels) > 0 {
++		if forbiddenUpdateLabels := p.getForbiddenLabels(modifiedLabels, a.GetOperation()); len(forbiddenUpdateLabels) > 0 {
+ 			return admission.NewForbidden(a, fmt.Errorf("is not allowed to modify labels: %s", strings.Join(forbiddenUpdateLabels.List(), ", ")))
+ 		}
++
+ 	}
+ 
+ 	return nil
+@@ -535,7 +536,7 @@ func getLabelNamespace(key string) string {
+ }
+ 
+ // getForbiddenLabels returns the set of labels that may not be added, removed, or modified by the node on create or update.
+-func (p *Plugin) getForbiddenLabels(modifiedLabels sets.String) sets.String {
++func (p *Plugin) getForbiddenLabels(modifiedLabels sets.String, admissionOpn admission.Operation) sets.String {
+ 	if len(modifiedLabels) == 0 {
+ 		return nil
+ 	}
+@@ -550,6 +551,11 @@ func (p *Plugin) getForbiddenLabels(modifiedLabels sets.String) sets.String {
+ 		// forbid kubelets from setting unknown kubernetes.io and k8s.io labels on update
+ 		if isKubernetesLabel(label) && !kubeletapis.IsKubeletLabel(label) {
+ 			// TODO: defer to label policy once available
++			if admissionOpn == admission.Create {
++				if kubeletapis.IsForbiddenOpenshiftLabel(label) {
++					continue
++				}
++			}
+ 			forbiddenLabels.Insert(label)
+ 		}
+ 	}
+diff --git a/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go b/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
+new file mode 100644
+index 00000000000..9535c1702c1
+--- /dev/null
++++ b/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
+@@ -0,0 +1,43 @@
++/*
++Copyright 2023 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package apis
++
++import (
++	"k8s.io/apimachinery/pkg/util/sets"
++)
++
++const (
++	NodeLabelControlPlane = "node-role.kubernetes.io/control-plane"
++	NodeLabelMaster       = "node-role.kubernetes.io/master"
++	NodeLabelWorker       = "node-role.kubernetes.io/worker"
++	NodeLabelEtcd         = "node-role.kubernetes.io/etcd"
++)
++
++var openshiftNodeLabels = sets.NewString(
++	NodeLabelControlPlane,
++	NodeLabelMaster,
++	NodeLabelWorker,
++	NodeLabelEtcd,
++)
++
++func OpenShiftNodeLabels() []string {
++	return openshiftNodeLabels.List()
++}
++
++func IsForbiddenOpenshiftLabel(label string) bool {
++	return openshiftNodeLabels.Has(label)
++}
+-- 
+2.46.0
+
