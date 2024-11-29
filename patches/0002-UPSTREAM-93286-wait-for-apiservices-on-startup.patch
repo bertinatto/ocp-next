@@ -1,4 +1,4 @@
-From f4deddf684f6713633065870024154baa0e48670 Mon Sep 17 00:00:00 2001
+From c60c5980c8d1ca689c5c0123f0f7ff4a171098da Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: 93286: wait for apiservices on startup
@@ -96,5 +96,5 @@ index d425ae7add0..1d14c5273a6 100644
  	s.GenericAPIServer.Handler.NonGoRestfulMux.UnlistedHandlePrefix(proxyPath+"/", proxyHandler)
  
 -- 
-2.46.0
+2.47.0
 

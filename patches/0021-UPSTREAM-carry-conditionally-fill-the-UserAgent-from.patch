@@ -1,4 +1,4 @@
-From 9d9675751fbebc278b6f6845aa3ecb88fa728156 Mon Sep 17 00:00:00 2001
+From 71f0732447c82456794dc6696f5009a960a95084 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:59 +0100
 Subject: [PATCH] UPSTREAM: <carry>: conditionally fill the UserAgent from the
@@ -12,10 +12,10 @@ OpenShift-Rebase-Source: 834af764f65
  1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/test/e2e/framework/util.go b/test/e2e/framework/util.go
-index b79c507c803..7d6979d98cf 100644
+index eb2f6386493..1e2866431c3 100644
 --- a/test/e2e/framework/util.go
 +++ b/test/e2e/framework/util.go
-@@ -515,9 +515,9 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
+@@ -518,9 +518,9 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
  type ClientConfigGetter func() (*restclient.Config, error)
  
  // LoadConfig returns a config for a rest client with the UserAgent set to include the current test name.
@@ -27,7 +27,7 @@ index b79c507c803..7d6979d98cf 100644
  			testDesc := ginkgo.CurrentSpecReport()
  			if len(testDesc.ContainerHierarchyTexts) > 0 {
  				testName := strings.Join(testDesc.ContainerHierarchyTexts, " ")
-@@ -559,8 +559,8 @@ func LoadConfig() (config *restclient.Config, err error) {
+@@ -562,8 +562,8 @@ func LoadConfig() (config *restclient.Config, err error) {
  }
  
  // LoadClientset returns clientset for connecting to kubernetes clusters.
@@ -39,5 +39,5 @@ index b79c507c803..7d6979d98cf 100644
  		return nil, fmt.Errorf("error creating client: %v", err.Error())
  	}
 -- 
-2.46.0
+2.47.0
 

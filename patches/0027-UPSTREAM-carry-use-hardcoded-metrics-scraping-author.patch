@@ -1,4 +1,4 @@
-From ac0086fa0e5fd03d12fc29c9aeb7ee49abb34916 Mon Sep 17 00:00:00 2001
+From 6180c911b4c7200777b990fdb1496ebdaca871e7 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Mon, 22 Feb 2021 14:11:49 -0500
 Subject: [PATCH] UPSTREAM: <carry>: use hardcoded metrics scraping authorizer
@@ -6,24 +6,9 @@ Subject: [PATCH] UPSTREAM: <carry>: use hardcoded metrics scraping authorizer
 
 OpenShift-Rebase-Source: d8adc0939f2
 ---
- openshift-kube-apiserver/openshiftkubeapiserver/patch.go      | 3 +++
  .../src/k8s.io/apiserver/pkg/server/options/authorization.go  | 4 ++++
- 2 files changed, 7 insertions(+)
+ 1 file changed, 4 insertions(+)
 
-diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
-index 39172be5b88..9fd2b00659a 100644
---- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
-+++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
-@@ -35,6 +35,9 @@ import (
- 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managednode"
- 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride"
- 	"k8s.io/kubernetes/openshift-kube-apiserver/admission/scheduler/nodeenv"
-+
-+	// magnet to get authorizer package in hack/update-vendor.sh
-+	_ "github.com/openshift/library-go/pkg/authorization/hardcodedauthorizer"
- )
- 
- func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, kubeInformers clientgoinformers.SharedInformerFactory, pluginInitializers *[]admission.PluginInitializer) error {
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go b/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go
 index 22fd4b18ce0..d726201fd50 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/options/authorization.go
@@ -47,5 +32,5 @@ index 22fd4b18ce0..d726201fd50 100644
  		a, err := path.NewAuthorizer(s.AlwaysAllowPaths)
  		if err != nil {
 -- 
-2.46.0
+2.47.0
 

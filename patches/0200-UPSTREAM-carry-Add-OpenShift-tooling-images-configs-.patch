@@ -1,0 +1,42 @@
+From a0a69297610a4be573a3168e302704add60a3319 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Fri, 29 Nov 2024 09:29:01 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ openshift-hack/e2e/annotate/rules.go | 10 +++++++---
+ 1 file changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index da7642b9cc9..7231bc8e2b4 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -11,17 +11,21 @@ var (
+ 		"[Disabled:Alpha]": {
+ 			`\[Feature:StorageVersionAPI\]`,
+ 			`\[Feature:InPlacePodVerticalScaling\]`,
+-			`\[Feature:RecoverVolumeExpansionFailure\]`,
+-			`\[Feature:WatchList\]`,
+ 			`\[Feature:ServiceCIDRs\]`,
+ 			`\[Feature:ClusterTrustBundle\]`,
+ 			`\[Feature:SELinuxMount\]`,
+ 			`\[FeatureGate:SELinuxMount\]`,
+-			`\[Feature:RelaxedEnvironmentVariableValidation\]`,
+ 			`\[Feature:UserNamespacesPodSecurityStandards\]`,
+ 			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
+ 			`\[Feature:DynamicResourceAllocation\]`,
+ 			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
++			// 4.19
++			`\[Feature:PodLevelResources\]`,
++			`\[Feature:SchedulerAsyncPreemption\]`,
++			`\[Feature:RelaxedDNSSearchValidation\]`,
++			`\[Feature:PodLogsQuerySplitStreams\]`,
++			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
++			`\[Feature:volumegroupsnapshot\]`,
+ 		},
+ 		// tests for features that are not implemented in openshift
+ 		"[Disabled:Unimplemented]": {
+-- 
+2.47.1
+

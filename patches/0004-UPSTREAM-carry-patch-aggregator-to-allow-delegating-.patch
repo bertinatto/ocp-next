@@ -1,4 +1,4 @@
-From 740464f918785c237c75797657d7b59fa648a5e2 Mon Sep 17 00:00:00 2001
+From ffb455228b4a9ea993041a5595edb06315707452 Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: patch aggregator to allow delegating
@@ -110,7 +110,7 @@ index 1d14c5273a6..164875e5caa 100644
  	groupPath := "/apis/" + apiService.Spec.Group
  	groupDiscoveryHandler := &apiGroupHandler{
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
-index a59974f3005..732081d0548 100644
+index 5292ec86489..76415aeaf0d 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/handler_proxy.go
 @@ -22,6 +22,7 @@ import (
@@ -192,5 +192,5 @@ index 00000000000..f7169c0d1ab
 +	return false
 +}
 -- 
-2.46.0
+2.47.0
 

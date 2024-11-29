@@ -1,4 +1,4 @@
-From d5b3ece12c142a4741ffff0d9826ff335fbf8833 Mon Sep 17 00:00:00 2001
+From 1d1a0d755544f249451d493c695b02a083bc2df2 Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -12,45 +12,47 @@ UPSTREAM: <carry>: Extend NodeLogQuery feature
 Fix handling of the "until" parameter when generating the journalctl
 command. This was incorrectly being passed with the "since" value.
 ---
- pkg/features/kube_features.go                 |   2 +-
+ pkg/features/versioned_kube_features.go       |   4 +-
  .../apis/config/validation/validation_test.go |   1 +
  pkg/kubelet/kubelet.go                        |   7 +-
  pkg/kubelet/kubelet_server_journal.go         | 111 +++++++++++++++---
  pkg/kubelet/kubelet_server_journal_linux.go   |  23 +++-
- pkg/kubelet/kubelet_server_journal_test.go    |  51 +++++---
+ pkg/kubelet/kubelet_server_journal_test.go    |  50 +++++---
  pkg/kubelet/kubelet_server_journal_windows.go |   9 +-
- 7 files changed, 162 insertions(+), 42 deletions(-)
+ 7 files changed, 162 insertions(+), 43 deletions(-)
 
-diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index 80a25132bca..d9353e21a49 100644
---- a/pkg/features/kube_features.go
-+++ b/pkg/features/kube_features.go
-@@ -1131,7 +1131,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
+diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
+index 9b8bbc6958f..7e3883a7a99 100644
+--- a/pkg/features/versioned_kube_features.go
++++ b/pkg/features/versioned_kube_features.go
+@@ -542,8 +542,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+ 	},
  
- 	NFTablesProxyMode: {Default: true, PreRelease: featuregate.Beta},
+ 	NodeLogQuery: {
+-		{Version: version.MustParse("1.27"), Default: false, PreRelease: featuregate.Alpha},
+-		{Version: version.MustParse("1.30"), Default: false, PreRelease: featuregate.Beta},
++		{Version: version.MustParse("1.27"), Default: true, PreRelease: featuregate.Alpha},
++		{Version: version.MustParse("1.30"), Default: true, PreRelease: featuregate.Beta},
+ 	},
  
--	NodeLogQuery: {Default: false, PreRelease: featuregate.Beta},
-+	NodeLogQuery: {Default: true, PreRelease: featuregate.Beta},
- 
- 	NodeOutOfServiceVolumeDetach: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.31
- 
+ 	NodeSwap: {
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
-index 22df9e3ab90..68d9ee3b04a 100644
+index 802c5506d37..8354fdb2334 100644
 --- a/pkg/kubelet/apis/config/validation/validation_test.go
 +++ b/pkg/kubelet/apis/config/validation/validation_test.go
-@@ -518,6 +518,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
- 	}, {
- 		name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
- 		configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-+			conf.FeatureGates = map[string]bool{"NodeLogQuery": false}
- 			conf.EnableSystemLogQuery = true
+@@ -389,6 +389,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+ 			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
+ 				MaxContainerRestartPeriod: &metav1.Duration{Duration: 0 * time.Second},
+ 			}
++
  			return conf
  		},
+ 		errMsg: "invalid configuration: CrashLoopBackOff.MaxContainerRestartPeriod (got: 0 seconds) must be set between 1s and 300s",
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index 68d790242db..b2f5fd1d01e 100644
+index b8bbfece860..e44d877c8fe 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -1603,16 +1603,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
+@@ -1685,16 +1685,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
  					http.Error(w, errs.ToAggregate().Error(), http.StatusBadRequest)
  					return
  				} else if nlq != nil {
@@ -70,7 +72,7 @@ index 68d790242db..b2f5fd1d01e 100644
  						return
  					}
 diff --git a/pkg/kubelet/kubelet_server_journal.go b/pkg/kubelet/kubelet_server_journal.go
-index cd3a02649b2..20fc9da6f0d 100644
+index 0159910803e..4ad5dcea527 100644
 --- a/pkg/kubelet/kubelet_server_journal.go
 +++ b/pkg/kubelet/kubelet_server_journal.go
 @@ -35,7 +35,7 @@ import (
@@ -263,7 +265,7 @@ index cd3a02649b2..20fc9da6f0d 100644
  }
  
  // splitNativeVsFileLoggers checks if each service logs to native OS logs or to a file and returns a list of services
-@@ -442,3 +510,16 @@ func safeServiceName(s string) error {
+@@ -413,3 +481,16 @@ func safeServiceName(s string) error {
  	}
  	return nil
  }
@@ -281,10 +283,10 @@ index cd3a02649b2..20fc9da6f0d 100644
 +	return fmt.Errorf("date must be a relative time of the form '(+|-)[0-9]+(s|m|h|d)' or a date in 'YYYY-MM-DD HH:MM:SS' form")
 +}
 diff --git a/pkg/kubelet/kubelet_server_journal_linux.go b/pkg/kubelet/kubelet_server_journal_linux.go
-index 3e24f3c5fcb..bbf0e977226 100644
+index 0265d08fccb..6bd22c8e749 100644
 --- a/pkg/kubelet/kubelet_server_journal_linux.go
 +++ b/pkg/kubelet/kubelet_server_journal_linux.go
-@@ -31,14 +31,20 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
+@@ -36,14 +36,20 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
  	args := []string{
  		"--utc",
  		"--no-pager",
@@ -309,7 +311,7 @@ index 3e24f3c5fcb..bbf0e977226 100644
  	if n.TailLines != nil {
  		args = append(args, "--pager-end", fmt.Sprintf("--lines=%d", *n.TailLines))
  	}
-@@ -49,12 +55,21 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
+@@ -54,12 +60,21 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
  	}
  	if len(n.Pattern) > 0 {
  		args = append(args, "--grep="+n.Pattern)
@@ -332,10 +334,10 @@ index 3e24f3c5fcb..bbf0e977226 100644
  }
  
 diff --git a/pkg/kubelet/kubelet_server_journal_test.go b/pkg/kubelet/kubelet_server_journal_test.go
-index 430a73fc27c..4ccc0811733 100644
+index 7e8c13c1f84..30d3ef81032 100644
 --- a/pkg/kubelet/kubelet_server_journal_test.go
 +++ b/pkg/kubelet/kubelet_server_journal_test.go
-@@ -73,10 +73,10 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -78,10 +78,10 @@ func Test_newNodeLogQuery(t *testing.T) {
  		want    *nodeLogQuery
  		wantErr bool
  	}{
@@ -349,7 +351,7 @@ index 430a73fc27c..4ccc0811733 100644
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02:00:00"}}, wantErr: true},
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02:00:00.000"}}, wantErr: true},
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02"}}, wantErr: true},
-@@ -84,7 +84,7 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -89,7 +89,7 @@ func Test_newNodeLogQuery(t *testing.T) {
  		{query: url.Values{"sinceTime": []string{validTimeValue}},
  			want: &nodeLogQuery{options: options{SinceTime: &validT}}},
  
@@ -358,16 +360,15 @@ index 430a73fc27c..4ccc0811733 100644
  		{query: url.Values{"untilTime": []string{"2019-12-04 02:00:00"}}, wantErr: true},
  		{query: url.Values{"untilTime": []string{"2019-12-04 02:00:00.000"}}, wantErr: true},
  		{query: url.Values{"untilTime": []string{"2019-12-04 02"}}, wantErr: true},
-@@ -98,7 +98,7 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -103,7 +103,6 @@ func Test_newNodeLogQuery(t *testing.T) {
  
  		{query: url.Values{"pattern": []string{"foo"}}, want: &nodeLogQuery{options: options{Pattern: "foo"}}},
  
 -		{query: url.Values{"boot": []string{""}}, want: nil},
-+		{query: url.Values{"boot": []string{""}}, want: &nodeLogQuery{}},
- 		{query: url.Values{"boot": []string{"0"}}, want: &nodeLogQuery{options: options{Boot: intPtr(0)}}},
- 		{query: url.Values{"boot": []string{"-23"}}, want: &nodeLogQuery{options: options{Boot: intPtr(-23)}}},
+ 		{query: url.Values{"boot": []string{"0"}}, want: &nodeLogQuery{options: options{Boot: ptr.To(0)}}},
+ 		{query: url.Values{"boot": []string{"-23"}}, want: &nodeLogQuery{options: options{Boot: ptr.To(-23)}}},
  		{query: url.Values{"boot": []string{"foo"}}, wantErr: true},
-@@ -111,6 +111,11 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -116,6 +115,11 @@ func Test_newNodeLogQuery(t *testing.T) {
  		{query: url.Values{"query": []string{"foo", "/bar"}}, want: &nodeLogQuery{Services: []string{"foo"},
  			Files: []string{"/bar"}}},
  		{query: url.Values{"query": []string{"/foo", `\bar`}}, want: &nodeLogQuery{Files: []string{"/foo", `\bar`}}},
@@ -379,7 +380,7 @@ index 430a73fc27c..4ccc0811733 100644
  	}
  	for _, tt := range tests {
  		t.Run(tt.query.Encode(), func(t *testing.T) {
-@@ -173,10 +178,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -180,10 +184,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		pattern  = "foo"
  		invalid  = "foo\\"
  	)
@@ -394,7 +395,7 @@ index 430a73fc27c..4ccc0811733 100644
  
  	tests := []struct {
  		name     string
-@@ -185,23 +192,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -192,23 +198,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		options  options
  		wantErr  bool
  	}{
@@ -413,15 +414,15 @@ index 430a73fc27c..4ccc0811733 100644
 -		{name: "since until", Services: []string{service1}, options: options{SinceTime: &until, UntilTime: &since},
 -			wantErr: true},
 -		// boot is not supported on Windows.
--		{name: "boot", Services: []string{service1}, options: options{Boot: intPtr(-1)}, wantErr: runtime.GOOS == "windows"},
+-		{name: "boot", Services: []string{service1}, options: options{Boot: ptr.To(-1)}, wantErr: runtime.GOOS == "windows"},
 +		{name: "sinceTime", Services: []string{service1}, options: options{SinceTime: &sinceTime}},
 +		{name: "untilTime", Services: []string{service1}, options: options{UntilTime: &untilTime}},
 +		{name: "sinceTime untilTime", Services: []string{service1}, options: options{SinceTime: &untilTime,
 +			UntilTime: &sinceTime}, wantErr: true},
-+		{name: "boot", Services: []string{service1}, options: options{Boot: intPtr(-1)}},
- 		{name: "boot out of range", Services: []string{service1}, options: options{Boot: intPtr(1)}, wantErr: true},
- 		{name: "tailLines", Services: []string{service1}, options: options{TailLines: intPtr(100)}},
- 		{name: "tailLines out of range", Services: []string{service1}, options: options{TailLines: intPtr(100000)}},
++		{name: "boot", Services: []string{service1}, options: options{Boot: ptr.To(-1)}},
+ 		{name: "boot out of range", Services: []string{service1}, options: options{Boot: ptr.To(1)}, wantErr: true},
+ 		{name: "tailLines", Services: []string{service1}, options: options{TailLines: ptr.To(100)}},
+ 		{name: "tailLines out of range", Services: []string{service1}, options: options{TailLines: ptr.To(100000)}},
 +		{name: "since", Services: []string{service1}, options: options{ocAdm: ocAdm{Since: since}}},
 +		{name: "since RFC3339", Services: []string{service1}, options: options{ocAdm: ocAdm{Since: sinceTime.String()}}, wantErr: true},
 +		{name: "until", Services: []string{service1}, options: options{ocAdm: ocAdm{Until: until}}},
@@ -463,5 +464,5 @@ index a805cfc5453..5134d65e8d2 100644
  	}
  	var providers []string
 -- 
-2.46.0
+2.47.0
 

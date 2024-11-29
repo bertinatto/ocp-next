@@ -1,0 +1,397 @@
+From 45e5765b1bbfc3458637e3e91a678eb1c5415d61 Mon Sep 17 00:00:00 2001
+From: Abu Kashem <akashem@redhat.com>
+Date: Fri, 29 Mar 2024 16:21:28 -0400
+Subject: [PATCH] UPSTREAM: <carry>: allow type mutation for specific secrets
+
+This is a short term fix, once we improve the cert rotation logic
+in library-go that does not depend on this hack, then we can
+remove this carry patch.
+
+squash with the previous PR during the rebase
+https://github.com/openshift/kubernetes/pull/1924
+
+squash with the previous PRs during the rebase
+openshift#1924
+openshift#1929
+---
+ pkg/apis/core/validation/validation.go        |   7 +-
+ pkg/apis/core/validation/validation_patch.go  |  68 +++++++++
+ .../core/validation/validation_patch_test.go  | 136 ++++++++++++++++++
+ ...shift_secret_updates_type_mutation_test.go | 129 +++++++++++++++++
+ 4 files changed, 339 insertions(+), 1 deletion(-)
+ create mode 100644 pkg/apis/core/validation/validation_patch.go
+ create mode 100644 pkg/apis/core/validation/validation_patch_test.go
+ create mode 100644 test/integration/apiserver/openshift_secret_updates_type_mutation_test.go
+
+diff --git a/pkg/apis/core/validation/validation.go b/pkg/apis/core/validation/validation.go
+index 031f4494f51..0cf35b51946 100644
+--- a/pkg/apis/core/validation/validation.go
++++ b/pkg/apis/core/validation/validation.go
+@@ -6657,7 +6657,12 @@ func ValidateSecret(secret *core.Secret) field.ErrorList {
+ func ValidateSecretUpdate(newSecret, oldSecret *core.Secret) field.ErrorList {
+ 	allErrs := ValidateObjectMetaUpdate(&newSecret.ObjectMeta, &oldSecret.ObjectMeta, field.NewPath("metadata"))
+ 
+-	allErrs = append(allErrs, ValidateImmutableField(newSecret.Type, oldSecret.Type, field.NewPath("type"))...)
++	// TODO: this is a short term fix, we can drop this patch once we
++	// migrate all of the affected secret objects to to intended type,
++	// see https://issues.redhat.com/browse/API-1800
++	if !openShiftValidateSecretUpdateIsTypeMutationAllowed(newSecret, oldSecret) {
++		allErrs = append(allErrs, ValidateImmutableField(newSecret.Type, oldSecret.Type, field.NewPath("type"))...)
++	}
+ 	if oldSecret.Immutable != nil && *oldSecret.Immutable {
+ 		if newSecret.Immutable == nil || !*newSecret.Immutable {
+ 			allErrs = append(allErrs, field.Forbidden(field.NewPath("immutable"), "field is immutable when `immutable` is set"))
+diff --git a/pkg/apis/core/validation/validation_patch.go b/pkg/apis/core/validation/validation_patch.go
+new file mode 100644
+index 00000000000..237c4d36949
+--- /dev/null
++++ b/pkg/apis/core/validation/validation_patch.go
+@@ -0,0 +1,68 @@
++/*
++Copyright 2024 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package validation
++
++import (
++	"k8s.io/kubernetes/pkg/apis/core"
++)
++
++var (
++	// we have multiple controllers reconciling the same secret,
++	// resulting in unexpected outcomes such as the generation of new key pairs.
++	// our goal is to prevent the generation of new key pairs by disallowing
++	// deletions and permitting only updates, which appear to be 'safe'.
++	//
++	// thus we make an exception for the secrets in the following namespaces, during update
++	// we allow the secret type to mutate from:
++	//     ["SecretTypeTLS", core.SecretTypeOpaque] -> "kubernetes.io/tls"
++	// some of our operators were accidentally creating secrets of type
++	// "SecretTypeTLS", and this patch enables us to move these secrets
++	// objects to the intended type in a ratcheting manner.
++	//
++	// we can drop this patch when we migrate all of the affected secret
++	// objects to to intended type: https://issues.redhat.com/browse/API-1800
++	whitelist = map[string]struct{}{
++		"openshift-kube-apiserver-operator":          {},
++		"openshift-kube-apiserver":                   {},
++		"openshift-kube-controller-manager-operator": {},
++		"openshift-config-managed":                   {},
++	}
++)
++
++func openShiftValidateSecretUpdateIsTypeMutationAllowed(newSecret, oldSecret *core.Secret) bool {
++	// initially, this check was stricter.
++	// however, due to the platform's long history (spanning several years)
++	// and the complexity of ensuring that resources were consistently created with only one type,
++	// it is now permissible for (SecretTypeTLS, core.SecretTypeOpaque) type to transition to "kubernetes.io/tls".
++	//
++	// additionally, it should be noted that default values might also be applied in some cases.
++	// (https://github.com/openshift/kubernetes/blob/258f1d5fb6491ba65fd8201c827e179432430627/pkg/apis/core/v1/defaults.go#L280-L284)
++	if isOldSecretTypeMutationAllowed(oldSecret) && newSecret.Type == core.SecretTypeTLS {
++		if _, ok := whitelist[oldSecret.Namespace]; ok {
++			return true
++		}
++	}
++	return false
++}
++
++func isOldSecretTypeMutationAllowed(oldSecret *core.Secret) bool {
++	// core.SecretTypeOpaque seems safe because
++	// https://github.com/kubernetes/kubernetes/blob/8628c3c4da6746b1dc967cc520b189a04ebd78d1/pkg/apis/core/validation/validation.go#L6393
++	//
++	// "SecretTypeTLS" is what kas-o used
++	return oldSecret.Type == core.SecretTypeOpaque || oldSecret.Type == "SecretTypeTLS"
++}
+diff --git a/pkg/apis/core/validation/validation_patch_test.go b/pkg/apis/core/validation/validation_patch_test.go
+new file mode 100644
+index 00000000000..4bd34659f4c
+--- /dev/null
++++ b/pkg/apis/core/validation/validation_patch_test.go
+@@ -0,0 +1,136 @@
++/*
++Copyright 2024 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package validation
++
++import (
++	"fmt"
++	"testing"
++
++	"github.com/google/go-cmp/cmp"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/util/validation/field"
++	"k8s.io/kubernetes/pkg/apis/core"
++)
++
++func TestOpenShiftValidateSecretUpdate(t *testing.T) {
++	newSecretFn := func(ns, name string, secretType core.SecretType) *core.Secret {
++		return &core.Secret{
++			ObjectMeta: metav1.ObjectMeta{
++				Name:            name,
++				Namespace:       ns,
++				ResourceVersion: "1",
++			},
++			Type: secretType,
++			Data: map[string][]byte{
++				"tls.key": []byte("foo"),
++				"tls.crt": []byte("bar"),
++			},
++		}
++	}
++	invalidTypeErrFn := func(secretType core.SecretType) field.ErrorList {
++		return field.ErrorList{
++			field.Invalid(field.NewPath("type"), secretType, "field is immutable"),
++		}
++	}
++	tlsKeyRequiredErrFn := func() field.ErrorList {
++		return field.ErrorList{
++			field.Required(field.NewPath("data").Key(core.TLSCertKey), ""),
++			field.Required(field.NewPath("data").Key(core.TLSPrivateKeyKey), ""),
++		}
++	}
++
++	for _, secretType := range []core.SecretType{"SecretTypeTLS", core.SecretTypeOpaque} {
++		for key := range whitelist {
++			ns, name := key, "foo"
++			t.Run(fmt.Sprintf("verify whitelist, key = %v, secretType = %v", key, secretType), func(t *testing.T) {
++				// exercise a valid type mutation: "secretType" -> "kubernetes.io/tls"
++				oldSecret, newSecret := newSecretFn(ns, name, secretType), newSecretFn(ns, name, core.SecretTypeTLS)
++				if errs := ValidateSecretUpdate(newSecret, oldSecret); len(errs) > 0 {
++					t.Errorf("unexpected error: %v", errs)
++				}
++
++				// the reverse should not be allowed
++				errExpected := invalidTypeErrFn(secretType)
++				oldSecret, newSecret = newSecretFn(ns, name, core.SecretTypeTLS), newSecretFn(ns, name, secretType)
++				if errGot := ValidateSecretUpdate(newSecret, oldSecret); !cmp.Equal(errExpected, errGot) {
++					t.Errorf("expected error: %v, diff: %s", errExpected, cmp.Diff(errExpected, errGot))
++				}
++
++				// no type change, no validation failure expected
++				oldSecret, newSecret = newSecretFn(ns, name, core.SecretTypeTLS), newSecretFn(ns, name, core.SecretTypeTLS)
++				if errs := ValidateSecretUpdate(newSecret, oldSecret); len(errs) > 0 {
++					t.Errorf("unexpected error: %v", errs)
++				}
++
++				// exercise an invalid type mutation, we expect validation failure
++				errExpected = invalidTypeErrFn(core.SecretTypeTLS)
++				oldSecret, newSecret = newSecretFn(ns, name, "AnyOtherType"), newSecretFn(ns, name, core.SecretTypeTLS)
++				if errGot := ValidateSecretUpdate(newSecret, oldSecret); !cmp.Equal(errExpected, errGot) {
++					t.Errorf("expected error: %v, diff: %s", errExpected, cmp.Diff(errExpected, errGot))
++				}
++
++				// verify that kbernetes.io/tls validation are enforced
++				errExpected = tlsKeyRequiredErrFn()
++				oldSecret, newSecret = newSecretFn(ns, name, secretType), newSecretFn(ns, name, core.SecretTypeTLS)
++				newSecret.Data = nil
++				if errGot := ValidateSecretUpdate(newSecret, oldSecret); !cmp.Equal(errExpected, errGot) {
++					t.Errorf("expected error: %v, diff: %s", errExpected, cmp.Diff(errExpected, errGot))
++				}
++			})
++		}
++	}
++
++	// we must not break secrets that are not in the whitelist
++	tests := []struct {
++		name        string
++		oldSecret   *core.Secret
++		newSecret   *core.Secret
++		errExpected field.ErrorList
++	}{
++		{
++			name:        "secret is not whitelisted, valid type transition, update not allowed",
++			oldSecret:   newSecretFn("foo", "bar", "SecretTypeTLS"),
++			newSecret:   newSecretFn("foo", "bar", core.SecretTypeTLS),
++			errExpected: invalidTypeErrFn(core.SecretTypeTLS),
++		},
++		{
++			name:        "secret is not whitelisted, invalid type transition, update not allowed",
++			oldSecret:   newSecretFn("foo", "bar", "SecretTypeTLS"),
++			newSecret:   newSecretFn("foo", "bar", core.SecretTypeOpaque),
++			errExpected: invalidTypeErrFn(core.SecretTypeOpaque),
++		},
++		{
++			name:      "secret is not whitelisted, no type transition, update allowed",
++			oldSecret: newSecretFn("foo", "bar", core.SecretTypeTLS),
++			newSecret: newSecretFn("foo", "bar", core.SecretTypeTLS),
++		},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			if _, ok := whitelist[test.oldSecret.Namespace]; ok {
++				t.Errorf("misconfigured test: secret is in whitelist: %s", test.oldSecret.Namespace)
++				return
++			}
++
++			errGot := ValidateSecretUpdate(test.newSecret, test.oldSecret)
++			if !cmp.Equal(test.errExpected, errGot) {
++				t.Errorf("expected error: %v, diff: %s", test.errExpected, cmp.Diff(test.errExpected, errGot))
++			}
++		})
++	}
++}
+diff --git a/test/integration/apiserver/openshift_secret_updates_type_mutation_test.go b/test/integration/apiserver/openshift_secret_updates_type_mutation_test.go
+new file mode 100644
+index 00000000000..97091fe745a
+--- /dev/null
++++ b/test/integration/apiserver/openshift_secret_updates_type_mutation_test.go
+@@ -0,0 +1,129 @@
++/*
++Copyright 2024 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package apiserver
++
++import (
++	"context"
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	apierrors "k8s.io/apimachinery/pkg/api/errors"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/util/sets"
++	"k8s.io/client-go/kubernetes"
++	apiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
++	"k8s.io/kubernetes/test/integration/framework"
++)
++
++// the list was copied from pkg/apis/core/validation/validation_patch.go
++var whitelistedSecretNamespaces = map[string]struct{}{
++	"openshift-kube-apiserver-operator":          {},
++	"openshift-kube-apiserver":                   {},
++	"openshift-kube-controller-manager-operator": {},
++	"openshift-config-managed":                   {},
++}
++
++// immortalNamespaces cannot be deleted, give the following error:
++// failed to delete namespace: "" is forbidden: this namespace may not be deleted
++var immortalNamespaces = sets.NewString("openshift-config-managed")
++
++func TestOpenShiftValidateWhiteListedSecretTypeMutationUpdateAllowed(t *testing.T) {
++	ctx := context.Background()
++	server, err := apiservertesting.StartTestServer(t, apiservertesting.NewDefaultTestServerOptions(), nil, framework.SharedEtcd())
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(server.TearDownFn)
++	client, err := kubernetes.NewForConfig(server.ClientConfig)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	for whiteListedSecretNamespace := range whitelistedSecretNamespaces {
++		_, err := client.CoreV1().Namespaces().Get(ctx, whiteListedSecretNamespace, metav1.GetOptions{})
++		if apierrors.IsNotFound(err) {
++			testNamespace := framework.CreateNamespaceOrDie(client, whiteListedSecretNamespace, t)
++			if !immortalNamespaces.Has(testNamespace.Name) {
++				t.Cleanup(func() { framework.DeleteNamespaceOrDie(client, testNamespace, t) })
++			}
++		} else if err != nil {
++			t.Fatal(err)
++		}
++
++		secret := constructSecretWithOldType(whiteListedSecretNamespace, "foo")
++		createdSecret, err := client.CoreV1().Secrets(whiteListedSecretNamespace).Create(ctx, secret, metav1.CreateOptions{})
++		if err != nil {
++			t.Errorf("failed to create secret, err = %v", err)
++		}
++
++		createdSecret.Type = corev1.SecretTypeTLS
++		updatedSecret, err := client.CoreV1().Secrets(whiteListedSecretNamespace).Update(ctx, createdSecret, metav1.UpdateOptions{})
++		if err != nil {
++			t.Errorf("failed to update the type of the secret, err = %v", err)
++		}
++		if updatedSecret.Type != corev1.SecretTypeTLS {
++			t.Errorf("unexpected type of the secret = %v, expected = %v", updatedSecret.Type, corev1.SecretTypeTLS)
++		}
++
++		//  "kubernetes.io/tls" -> "SecretTypeTLS" is not allowed
++		toUpdateSecret := updatedSecret
++		toUpdateSecret.Type = "SecretTypeTLS"
++		_, err = client.CoreV1().Secrets(whiteListedSecretNamespace).Update(ctx, toUpdateSecret, metav1.UpdateOptions{})
++		if !apierrors.IsInvalid(err) {
++			t.Errorf("unexpected error returned: %v", err)
++		}
++	}
++}
++
++func TestNotWhiteListedSecretTypeMutationUpdateDisallowed(t *testing.T) {
++	ctx := context.Background()
++	server, err := apiservertesting.StartTestServer(t, apiservertesting.NewDefaultTestServerOptions(), nil, framework.SharedEtcd())
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(server.TearDownFn)
++	client, err := kubernetes.NewForConfig(server.ClientConfig)
++	if err != nil {
++		t.Fatal(err)
++	}
++
++	testNamespace := framework.CreateNamespaceOrDie(client, "secret-type-update-disallowed", t)
++	t.Cleanup(func() { framework.DeleteNamespaceOrDie(client, testNamespace, t) })
++
++	secret := constructSecretWithOldType(testNamespace.Name, "foo")
++	createdSecret, err := client.CoreV1().Secrets(testNamespace.Name).Create(ctx, secret, metav1.CreateOptions{})
++	if err != nil {
++		t.Errorf("failed to create secret, err = %v", err)
++	}
++
++	createdSecret.Type = corev1.SecretTypeTLS
++	_, err = client.CoreV1().Secrets(testNamespace.Name).Update(ctx, createdSecret, metav1.UpdateOptions{})
++	if !apierrors.IsInvalid(err) {
++		t.Errorf("unexpected error returned: %v", err)
++	}
++}
++
++func constructSecretWithOldType(ns, name string) *corev1.Secret {
++	return &corev1.Secret{
++		ObjectMeta: metav1.ObjectMeta{
++			Namespace: ns,
++			Name:      name,
++		},
++		Type: "SecretTypeTLS",
++		Data: map[string][]byte{"tls.crt": {}, "tls.key": {}},
++	}
++}
+-- 
+2.47.0
+

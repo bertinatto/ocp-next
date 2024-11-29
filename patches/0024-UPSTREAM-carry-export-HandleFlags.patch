@@ -1,4 +1,4 @@
-From 536a14e21feb837f0ffda220a8d99712f5d8da2d Mon Sep 17 00:00:00 2001
+From 909b7b47d4d8c0b08dcf0ccdaee16a68421c9245 Mon Sep 17 00:00:00 2001
 From: Maciej Szulik <maszulik@redhat.com>
 Date: Wed, 21 Jul 2021 10:37:40 +0200
 Subject: [PATCH] UPSTREAM: <carry>: export HandleFlags
@@ -11,7 +11,7 @@ OpenShift-Rebase-Source: 7bf2f1f71c0
  create mode 100644 test/e2e/patch_e2e.go
 
 diff --git a/test/e2e/e2e_test.go b/test/e2e/e2e_test.go
-index 3d57da32153..71e82d2c08c 100644
+index 32cc2352851..d83228f0999 100644
 --- a/test/e2e/e2e_test.go
 +++ b/test/e2e/e2e_test.go
 @@ -36,7 +36,6 @@ import (
@@ -67,5 +67,5 @@ index 00000000000..c0aecd32cda
 +	flag.Parse()
 +}
 -- 
-2.46.0
+2.47.0
 

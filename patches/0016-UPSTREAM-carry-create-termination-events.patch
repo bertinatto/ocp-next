@@ -1,4 +1,4 @@
-From 60948dd58e80a028b3d7ff7761ffa87bdcc50fa7 Mon Sep 17 00:00:00 2001
+From e4b9bcd99af9f210f6d674f27bb9fd43ad0a9737 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: create termination events
@@ -55,7 +55,7 @@ UPSTREAM: <carry>: extend termination events
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
 
 diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index 568d0c138a6..5fe823a040e 100644
+index ef6bd35e665..99fb2183da3 100644
 --- a/pkg/controlplane/apiserver/config.go
 +++ b/pkg/controlplane/apiserver/config.go
 @@ -28,6 +28,7 @@ import (
@@ -153,12 +153,12 @@ index 00000000000..67707dfcbe4
 +	return &v1ret, nil
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 10069580920..f24992a41ed 100644
+index bf29e660b42..dcda51e1746 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -73,6 +73,8 @@ import (
+@@ -72,6 +72,8 @@ import (
+ 	utilflowcontrol "k8s.io/apiserver/pkg/util/flowcontrol"
  	flowcontrolrequest "k8s.io/apiserver/pkg/util/flowcontrol/request"
- 	utilversion "k8s.io/apiserver/pkg/util/version"
  	"k8s.io/client-go/informers"
 +	"k8s.io/client-go/kubernetes"
 +	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -209,7 +209,7 @@ index 10069580920..f24992a41ed 100644
  	return c.Config.Complete(c.SharedInformerFactory)
  }
  
-@@ -837,7 +862,19 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
+@@ -841,7 +866,19 @@ func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*G
  		FeatureGate:      c.FeatureGate,
  
  		muxAndDiscoveryCompleteSignals: map[string]<-chan struct{}{},
@@ -229,7 +229,7 @@ index 10069580920..f24992a41ed 100644
  
  	if c.FeatureGate.Enabled(genericfeatures.AggregatedDiscoveryEndpoint) {
  		manager := c.AggregatedDiscoveryGroupManager
-@@ -1042,6 +1079,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1046,6 +1083,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	handler = genericapifilters.WithRequestDeadline(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator,
  		c.LongRunningFunc, c.Serializer, c.RequestTimeout)
  	handler = genericfilters.WithWaitGroup(handler, c.LongRunningFunc, c.NonLongRunningRequestWaitGroup)
@@ -239,7 +239,7 @@ index 10069580920..f24992a41ed 100644
  		handler = genericfilters.WithWatchTerminationDuringShutdown(handler, c.lifecycleSignals, c.WatchRequestWaitGroup)
  	}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go b/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
-index 52fb449ac6e..27a3a110520 100644
+index 7daa3a7aef5..def6ecbd366 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/genericapiserver.go
 @@ -30,6 +30,7 @@ import (
@@ -628,5 +628,5 @@ index 00000000000..ac1ea0d7d42
 +func (clientEventSink) Destroy() {
 +}
 -- 
-2.46.0
+2.47.0
 

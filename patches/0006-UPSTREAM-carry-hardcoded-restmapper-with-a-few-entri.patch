@@ -1,4 +1,4 @@
-From 3e745666c74f6aa2b5c1eae178ee9395628d61bf Mon Sep 17 00:00:00 2001
+From 7c809524cd07149d4b680a38c30ef0330871eac6 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: hardcoded restmapper with a few entries to
@@ -14,10 +14,10 @@ OpenShift-Rebase-Source: a00f75daeb5
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/options/patch_restmapper.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/admission.go b/staging/src/k8s.io/apiserver/pkg/server/options/admission.go
-index 61085e94ebd..1e9dd4e61c9 100644
+index 6b4669e4506..f10e5ed5f38 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/options/admission.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/options/admission.go
-@@ -153,7 +153,7 @@ func (a *AdmissionOptions) ApplyTo(
+@@ -154,7 +154,7 @@ func (a *AdmissionOptions) ApplyTo(
  	discoveryClient := cacheddiscovery.NewMemCacheClient(kubeClient.Discovery())
  	discoveryRESTMapper := restmapper.NewDeferredDiscoveryRESTMapper(discoveryClient)
  	genericInitializer := initializer.New(kubeClient, dynamicClient, informers, c.Authorization.Authorizer, features,
@@ -44,5 +44,5 @@ index 00000000000..bce6453ee5f
 +	return openshiftrestmapper.NewOpenShiftHardcodedRESTMapper(delegate)
 +}
 -- 
-2.46.0
+2.47.0
 

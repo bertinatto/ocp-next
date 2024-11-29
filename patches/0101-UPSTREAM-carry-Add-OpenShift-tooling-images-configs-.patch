@@ -1,0 +1,40 @@
+From bf8a34326d38ed489c484e11c6592011b2abcc05 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Thu, 28 Nov 2024 17:17:38 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ .../src/k8s.io/code-generator/examples/hack/verify-codegen.sh   | 2 ++
+ staging/src/k8s.io/code-generator/kube_codegen.sh               | 2 ++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh b/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
+index 7dd5e657671..72ead8ed650 100755
+--- a/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
++++ b/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
+@@ -43,6 +43,8 @@ else
+   exit 1
+ fi
+ 
++GOFLAGS=-mod=readonly
++
+ # smoke test
+ echo "Smoke testing examples by compiling..."
+ pushd "${SCRIPT_ROOT}"
+diff --git a/staging/src/k8s.io/code-generator/kube_codegen.sh b/staging/src/k8s.io/code-generator/kube_codegen.sh
+index 8207da5eddd..1ae02947830 100755
+--- a/staging/src/k8s.io/code-generator/kube_codegen.sh
++++ b/staging/src/k8s.io/code-generator/kube_codegen.sh
+@@ -27,6 +27,8 @@ set -o pipefail
+ 
+ KUBE_CODEGEN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ 
++GOFLAGS=-mod=readonly
++
+ function kube::codegen::internal::findz() {
+     # We use `find` rather than `git ls-files` because sometimes external
+     # projects use this across repos.  This is an imperfect wrapper of find,
+-- 
+2.47.1
+

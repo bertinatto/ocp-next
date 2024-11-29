@@ -1,4 +1,4 @@
-From 723774c8f5c371a84f2da9340e60b4350a0d27a9 Mon Sep 17 00:00:00 2001
+From f3629db244707dc2aff40c64dd4286d0b362b651 Mon Sep 17 00:00:00 2001
 From: Maru Newby <marun@redhat.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -582,6 +582,35 @@ Squash to openshift tooling.
 UPSTREAM: <carry>: sync imports and update test rules
 
 This should be suqashed with tooling.
+
+UPSTREAM: <carry>: use host etcd
+
+UPSTREAM: <carry>: skip storage tests
+
+UPSTREAM: <carry>: skip PodLifecycleSleepAction test
+
+UPSTREAM: <carry>: add tool to validate test packages imported
+
+UPSTREAM: <carry>: update test annotations for sno
+
+recent addition of upstream architecture package to openshift tests include.go is breaking conformance tests for sno
+should squash with tooling
+
+Signed-off-by: ehila <ehila@redhat.com>
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+bump images to 4.18 and kubernetes to 1.31.0
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+update Disabled:Alpha test rules
+
+UPSTREAM: <carry>: Add OpenShift tooling, images, configs and docs
+
+disable verify-e2e-suites.sh
+
+UPSTREAM: <carry>: skip VolumeAttributesClass tests
 ---
  .ci-operator.yaml                             |     4 +
  .gitignore                                    |     7 +
@@ -595,14 +624,13 @@ This should be suqashed with tooling.
  cmd/watch-termination/main.go                 |   366 +
  hack/lib/golang.sh                            |    46 +-
  hack/lib/version.sh                           |     2 +
- hack/make-rules/test.sh                       |     1 +
  hack/make-rules/update.sh                     |     2 +
- hack/make-rules/verify.sh                     |    16 +
+ hack/make-rules/verify.sh                     |    17 +
  hack/update-codegen.sh                        |     2 +-
  hack/update-kubensenter.sh                    |     1 +
  hack/update-openapi-spec.sh                   |     2 +-
  hack/update-test-annotations.sh               |     1 +
- hack/update-vendor.sh                         |    11 +-
+ hack/update-vendor.sh                         |     9 +-
  hack/verify-external-dependencies-version.sh  |     2 +-
  hack/verify-govulncheck.sh                    |     6 +-
  hack/verify-kubensenter.sh                    |     1 +
@@ -623,7 +651,7 @@ This should be suqashed with tooling.
  openshift-hack/e2e/annotate/annotate_test.go  |    55 +
  openshift-hack/e2e/annotate/cmd/main.go       |     9 +
  .../generated/zz_generated.annotations.go     | 14996 ++++++++++++++++
- openshift-hack/e2e/annotate/rules.go          |   384 +
+ openshift-hack/e2e/annotate/rules.go          |   417 +
  openshift-hack/e2e/annotate/rules_test.go     |    88 +
  openshift-hack/e2e/include.go                 |    41 +
  openshift-hack/e2e/kube_e2e_test.go           |   110 +
@@ -667,7 +695,7 @@ This should be suqashed with tooling.
  openshift.spec                                |   180 +
  pkg/kubelet/DOWNSTREAM_OWNERS                 |    17 +
  test/typecheck/main.go                        |     4 +-
- 84 files changed, 22162 insertions(+), 52 deletions(-)
+ 83 files changed, 22194 insertions(+), 51 deletions(-)
  create mode 100644 .ci-operator.yaml
  create mode 100644 .snyk
  create mode 100644 DOWNSTREAM_OWNERS
@@ -738,14 +766,14 @@ This should be suqashed with tooling.
 
 diff --git a/.ci-operator.yaml b/.ci-operator.yaml
 new file mode 100644
-index 00000000000..1e59c02c25a
+index 00000000000..64887a08b41
 --- /dev/null
 +++ b/.ci-operator.yaml
 @@ -0,0 +1,4 @@
 +build_root_image:
 +  name: release
 +  namespace: openshift
-+  tag: rhel-9-release-golang-1.22-openshift-4.17
++  tag: rhel-9-release-golang-1.22-openshift-4.18
 diff --git a/.gitignore b/.gitignore
 index c1915d7a154..fc737de69ed 100644
 --- a/.gitignore
@@ -1855,7 +1883,7 @@ index 00000000000..aa3aa880085
 +	}, nil
 +}
 diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
-index 1a65f82154b..fd111fea3cd 100755
+index 6b673a12925..c7e8ff68ef0 100755
 --- a/hack/lib/golang.sh
 +++ b/hack/lib/golang.sh
 @@ -78,6 +78,8 @@ kube::golang::server_targets() {
@@ -1889,7 +1917,7 @@ index 1a65f82154b..fd111fea3cd 100755
  
  # Fully-qualified package names that we want to instrument for coverage information.
  readonly KUBE_COVERAGE_INSTRUMENTED_PACKAGES=(
-@@ -495,7 +484,7 @@ kube::golang::set_platform_envs() {
+@@ -508,7 +497,7 @@ kube::golang::set_platform_envs() {
  
    # if CC is defined for platform then always enable it
    ccenv=$(echo "$platform" | awk -F/ '{print "KUBE_" toupper($1) "_" toupper($2) "_CC"}')
@@ -1898,7 +1926,7 @@ index 1a65f82154b..fd111fea3cd 100755
      export CGO_ENABLED=1
      export CC="${!ccenv}"
    fi
-@@ -506,27 +495,6 @@ kube::golang::set_platform_envs() {
+@@ -519,27 +508,6 @@ kube::golang::set_platform_envs() {
  #   env-var GO_VERSION is the desired go version to use, downloading it if needed (defaults to content of .go-version)
  #   env-var FORCE_HOST_GO set to a non-empty value uses the go version in the $PATH and skips ensuring $GO_VERSION is used
  kube::golang::internal::verify_go_version() {
@@ -1926,7 +1954,7 @@ index 1a65f82154b..fd111fea3cd 100755
    if [[ -z "$(command -v go)" ]]; then
      kube::log::usage_from_stdin <<EOF
  Can't find 'go' in PATH, please fix and retry.
-@@ -599,7 +567,11 @@ kube::golang::setup_gomaxprocs() {
+@@ -612,7 +580,11 @@ kube::golang::setup_gomaxprocs() {
    # when running in a container, please see https://github.com/golang/go/issues/33803
    if [[ -z "${GOMAXPROCS:-}" ]]; then
      if ! command -v ncpu >/dev/null 2>&1; then
@@ -1952,36 +1980,24 @@ index ffd8bc3789a..ae3853df384 100644
    # If the kubernetes source was exported through git archive, then
    # we likely don't have a git tree, but these magic values may be filled in.
    # shellcheck disable=SC2016,SC2050
-diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
-index 9912737d7f5..3f22d35f6fb 100755
---- a/hack/make-rules/test.sh
-+++ b/hack/make-rules/test.sh
-@@ -50,6 +50,7 @@ kube::test::find_dirs() {
-           -o -path './third_party/*' \
-           -o -path './staging/*' \
-           -o -path './vendor/*' \
-+          -o -path './openshift-hack/e2e/*' \
-         \) -prune \
-       \) -name '*_test.go' -print0 | xargs -0n1 dirname | LC_ALL=C sort -u
- 
 diff --git a/hack/make-rules/update.sh b/hack/make-rules/update.sh
-index 4037cd3b86c..d58b468d696 100755
+index 69684b5d785..aa7cf663783 100755
 --- a/hack/make-rules/update.sh
 +++ b/hack/make-rules/update.sh
-@@ -37,6 +37,8 @@ fi
+@@ -36,6 +36,8 @@ if ! ${ALL} ; then
+ fi
  
  BASH_TARGETS=(
- 	update-go-workspace
 +	update-kubensenter
 +	update-test-annotations
  	update-codegen
  	update-generated-api-compatibility-data
  	update-generated-docs
 diff --git a/hack/make-rules/verify.sh b/hack/make-rules/verify.sh
-index 8862454af02..03f3493d062 100755
+index c53cbf230e8..a14a872fb1f 100755
 --- a/hack/make-rules/verify.sh
 +++ b/hack/make-rules/verify.sh
-@@ -39,6 +39,22 @@ EXCLUDED_PATTERNS=(
+@@ -44,6 +44,23 @@ EXCLUDED_PATTERNS=(
    "verify-openapi-docs-urls.sh"  # Spams docs URLs, don't run in CI.
    )
  
@@ -1999,16 +2015,17 @@ index 8862454af02..03f3493d062 100755
 +  "verify-shellcheck.sh"                    # TODO(soltysh) Requires either docker or local shellcheck
 +  "verify-spelling.sh"                      # TODO(soltysh) Need to ensure installation of misspell command
 +  "verify-mocks.sh"                         # TODO(soltysh) I don't expect us needed mocks re-generation
++  "verify-e2e-suites.sh"                    # TODO(atiratree) needs to be patched for openshift-hack dir and --list-tests option is disabled by 'UPSTREAM: <carry>: temporarily disable reporting e2e text bugs and enforce 2nd labeling to make tests work'
 +)
 +
  # Exclude typecheck in certain cases, if they're running in a separate job.
  if [[ ${EXCLUDE_TYPECHECK:-} =~ ^[yY]$ ]]; then
    EXCLUDED_PATTERNS+=(
 diff --git a/hack/update-codegen.sh b/hack/update-codegen.sh
-index 7b65a50807e..6eae36781ad 100755
+index 3f146f18f22..4f8580eb6e5 100755
 --- a/hack/update-codegen.sh
 +++ b/hack/update-codegen.sh
-@@ -762,7 +762,7 @@ function codegen::subprojects() {
+@@ -763,7 +763,7 @@ function codegen::subprojects() {
          CODEGEN_PKG="${codegen}" \
          UPDATE_API_KNOWN_VIOLATIONS="${UPDATE_API_KNOWN_VIOLATIONS}" \
          API_KNOWN_VIOLATIONS_DIR="${API_KNOWN_VIOLATIONS_DIR}" \
@@ -2026,7 +2043,7 @@ index 00000000000..1b263065ff4
 +../openshift-hack/update-kubensenter.sh
 \ No newline at end of file
 diff --git a/hack/update-openapi-spec.sh b/hack/update-openapi-spec.sh
-index ba6ec258c48..c8f68f9c441 100755
+index c480592b66e..2cc1c1b216d 100755
 --- a/hack/update-openapi-spec.sh
 +++ b/hack/update-openapi-spec.sh
 @@ -28,7 +28,7 @@ source "${KUBE_ROOT}/hack/lib/init.sh"
@@ -2047,33 +2064,10 @@ index 00000000000..ecf920cd8d6
 +../openshift-hack/update-test-annotations.sh
 \ No newline at end of file
 diff --git a/hack/update-vendor.sh b/hack/update-vendor.sh
-index fd9f742321e..98e95785162 100755
+index f260c92a453..c1bdf1b44bd 100755
 --- a/hack/update-vendor.sh
 +++ b/hack/update-vendor.sh
-@@ -339,7 +339,7 @@ for repo in $(tsort "${TMP_DIR}/tidy_deps.txt"); do
- 
-     # disallow transitive dependencies on k8s.io/kubernetes
-     loopback_deps=()
--    kube::util::read-array loopback_deps < <(go list all 2>/dev/null | grep k8s.io/kubernetes/ || true)
-+    kube::util::read-array loopback_deps < <(go list all 2>/dev/null | grep k8s.io/kubernetes/ | grep -v github.com/openshift/apiserver-library-go || true)
-     if (( "${#loopback_deps[@]}" > 0 )); then
-       kube::log::error "${#loopback_deps[@]} disallowed ${repo} -> k8s.io/kubernetes dependencies exist via the following imports: $(go mod why "${loopback_deps[@]}")" >&22 2>&1
-       exit 1
-@@ -376,9 +376,10 @@ xargs -L 100 go mod edit -fmt
- 
- # disallow transitive dependencies on k8s.io/kubernetes
- loopback_deps=()
--kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' || true)
--if (( "${#loopback_deps[@]}" > 0 )); then
--  kube::log::error "${#loopback_deps[@]} disallowed transitive k8s.io/kubernetes dependencies exist via the following imports:" >&22 2>&1
-+kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' | grep -v github.com/openshift/apiserver-library-go || true)
-+## Allow apiserver-library-go to depend on k8s.io/kubernetes
-+if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} && ! "${loopback_deps[*]}" =~ github.com/openshift/apiserver-library-go ]]; then
-+  kube::log::error "Disallowed transitive k8s.io/kubernetes dependencies exist via the following imports:" >&22 2>&1
-   kube::log::error "${loopback_deps[@]}" >&22 2>&1
-   exit 1
- fi
-@@ -419,7 +420,7 @@ hack/update-vendor-licenses.sh
+@@ -308,7 +308,7 @@ hack/update-vendor-licenses.sh
  kube::log::status "vendor: creating OWNERS file" >&11
  rm -f "vendor/OWNERS"
  cat <<__EOF__ > "vendor/OWNERS"
@@ -2082,16 +2076,37 @@ index fd9f742321e..98e95785162 100755
  
  options:
    # make root approval non-recursive
+@@ -326,7 +326,7 @@ for repo in $(kube::util::list_staging_repos); do
+     echo "=== checking k8s.io/${repo}"
+     cd "staging/src/k8s.io/${repo}"
+     loopback_deps=()
+-    kube::util::read-array loopback_deps < <(go list all 2>/dev/null | grep k8s.io/kubernetes/ || true)
++    kube::util::read-array loopback_deps < <(go list all 2>/dev/null | grep k8s.io/kubernetes/ | grep -v github.com/openshift/apiserver-library-go || true)
+     if (( "${#loopback_deps[@]}" > 0 )); then
+       kube::log::error "${#loopback_deps[@]} disallowed ${repo} -> k8s.io/kubernetes dependencies exist via the following imports: $(go mod why "${loopback_deps[@]}")" >&22 2>&1
+       exit 1
+@@ -336,8 +336,9 @@ done
+ 
+ kube::log::status "go.mod: prevent k8s.io/kubernetes --> * --> k8s.io/kubernetes dep" >&11
+ loopback_deps=()
+-kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' || true)
+-if (( "${#loopback_deps[@]}" > 0 )); then
++kube::util::read-array loopback_deps < <(go mod graph | grep ' k8s.io/kubernetes' | grep -v github.com/openshift/apiserver-library-go || true)
++# Allow apiserver-library-go to depend on k8s.io/kubernetes
++if [[ -n ${loopback_deps[*]:+"${loopback_deps[*]}"} && ! "${loopback_deps[*]}" =~ github.com/openshift/apiserver-library-go ]]; then
+   kube::log::error "${#loopback_deps[@]} disallowed transitive k8s.io/kubernetes dependencies exist via the following imports:" >&22 2>&1
+   kube::log::error "${loopback_deps[@]}" >&22 2>&1
+   exit 1
 diff --git a/hack/verify-external-dependencies-version.sh b/hack/verify-external-dependencies-version.sh
-index 9b39e870561..f3de755672f 100755
+index 4734f199e09..a395239576f 100755
 --- a/hack/verify-external-dependencies-version.sh
 +++ b/hack/verify-external-dependencies-version.sh
 @@ -31,7 +31,7 @@ export GOBIN="${KUBE_OUTPUT_BIN}"
  PATH="${GOBIN}:${PATH}"
  
  # Install zeitgeist
--go install sigs.k8s.io/zeitgeist@v0.5.3
-+go install -mod=readonly sigs.k8s.io/zeitgeist@v0.5.3
+-go install sigs.k8s.io/zeitgeist@v0.5.4
++go install -mod=readonly sigs.k8s.io/zeitgeist@v0.5.4
  
  # Prefer full path for running zeitgeist
  ZEITGEIST_BIN="$(which zeitgeist)"
@@ -2163,7 +2178,7 @@ index 00000000000..a9cbed2d324
 +../openshift-hack/verify-test-annotations.sh
 \ No newline at end of file
 diff --git a/hack/verify-vendor.sh b/hack/verify-vendor.sh
-index dbdefedae39..ea0c942da86 100755
+index c68fbbbc840..028a551da5b 100755
 --- a/hack/verify-vendor.sh
 +++ b/hack/verify-vendor.sh
 @@ -84,8 +84,12 @@ pushd "${KUBE_ROOT}" > /dev/null 2>&1
@@ -18456,10 +18471,10 @@ index 00000000000..f1d47c01428
 +}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
 new file mode 100644
-index 00000000000..c3091099e92
+index 00000000000..99441e26d65
 --- /dev/null
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -0,0 +1,384 @@
+@@ -0,0 +1,417 @@
 +package annotate
 +
 +import (
@@ -18481,7 +18496,9 @@ index 00000000000..c3091099e92
 +			`\[FeatureGate:SELinuxMount\]`,
 +			`\[Feature:RelaxedEnvironmentVariableValidation\]`,
 +			`\[Feature:UserNamespacesPodSecurityStandards\]`,
++			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
 +			`\[Feature:DynamicResourceAllocation\]`,
++			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
 +		},
 +		// tests for features that are not implemented in openshift
 +		"[Disabled:Unimplemented]": {
@@ -18589,10 +18606,6 @@ index 00000000000..c3091099e92
 +			`\[sig-network\] Networking Granular Checks: Services should function for service endpoints using hostNetwork`,
 +			`\[sig-network\] Networking Granular Checks: Services should function for pod-Service\(hostNetwork\)`,
 +
-+			// https://issues.redhat.com/browse/OCPBUGS-7125
-+			`\[sig-network\] LoadBalancers should be able to preserve UDP traffic when server pod cycles for a LoadBalancer service on different nodes`,
-+			`\[sig-network\] LoadBalancers should be able to preserve UDP traffic when server pod cycles for a LoadBalancer service on the same nodes`,
-+
 +			// https://bugzilla.redhat.com/show_bug.cgi?id=1952460
 +			`\[sig-network\] Firewall rule control plane should not expose well-known ports`,
 +
@@ -18614,6 +18627,9 @@ index 00000000000..c3091099e92
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-34594
 +			`\[sig-node\] \[Feature:PodLifecycleSleepAction\] when create a pod with lifecycle hook using sleep action valid prestop hook using sleep action`,
++
++			// https://issues.redhat.com/browse/OCPBUGS-38839
++			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
 +		},
 +		// tests that need to be temporarily disabled while the rebase is in progress.
 +		"[Disabled:RebaseInProgress]": {
@@ -18682,12 +18698,28 @@ index 00000000000..c3091099e92
 +			// Internet access required
 +			`\[sig-network\] Networking should provide Internet connection for containers`,
 +		},
++		"[Skipped:alibabacloud]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:aws]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
++			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
++		},
 +		"[Skipped:azure]": {
 +			"Networking should provide Internet connection for containers", // Azure does not allow ICMP traffic to internet.
 +			// Azure CSI migration changed how we treat regions without zones.
 +			// See https://bugzilla.redhat.com/bugzilla/show_bug.cgi?id=2066865
 +			`\[sig-storage\] In-tree Volumes \[Driver: azure-disk\] \[Testpattern: Dynamic PV \(immediate binding\)\] topology should provision a volume and schedule a pod with AllowedTopologies`,
 +			`\[sig-storage\] In-tree Volumes \[Driver: azure-disk\] \[Testpattern: Dynamic PV \(delayed binding\)\] topology should provision a volume and schedule a pod with AllowedTopologies`,
++		},
++		"[Skipped:baremetal]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
 +		},
 +		"[Skipped:gce]": {
 +			// Requires creation of a different compute instance in a different zone and is not compatible with volumeBindingMode of WaitForFirstConsumer which we use in 4.x
@@ -18698,7 +18730,7 @@ index 00000000000..c3091099e92
 +			`\[sig-storage\] Flexvolumes should be mountable`,
 +			`\[sig-storage\] Detaching volumes should not work when mount is in progress`,
 +
-+			// We are using openshift-sdn to conceal metadata
++			// We are using ovn-kubernetes to conceal metadata
 +			`\[sig-auth\] Metadata Concealment should run a check-metadata-concealment job to completion`,
 +
 +			// https://bugzilla.redhat.com/show_bug.cgi?id=1740959
@@ -18718,6 +18750,37 @@ index 00000000000..c3091099e92
 +			`\[HPA\] Horizontal pod autoscaling \(scale resource: Custom Metrics from Stackdriver\)`,
 +			`\[Feature:CustomMetricsAutoscaling\]`,
 +		},
++		"[Skipped:ibmcloud]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:kubevirt]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:nutanix]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:openstack]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:ovirt]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++		"[Skipped:vsphere]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-38840
++			`\[Feature:LoadBalancer\]`,
++		},
++
 +		"[sig-node]": {
 +			`\[NodeConformance\]`,
 +			`NodeLease`,
@@ -18740,17 +18803,6 @@ index 00000000000..c3091099e92
 +			// not run, assigned to arch as catch-all
 +			`\[Feature:GKELocalSSD\]`,
 +			`\[Feature:GKENodePool\]`,
-+		},
-+		// Tests that don't pass under openshift-sdn.
-+		// These are skipped explicitly by openshift-hack/test-kubernetes-e2e.sh,
-+		// but will also be skipped by openshift-tests in jobs that use openshift-sdn.
-+		"[Skipped:Network/OpenShiftSDN]": {
-+			`NetworkPolicy.*IPBlock`,    // feature is not supported by openshift-sdn
-+			`NetworkPolicy.*[Ee]gress`,  // feature is not supported by openshift-sdn
-+			`NetworkPolicy.*named port`, // feature is not supported by openshift-sdn
-+
-+			`NetworkPolicy between server and client should support a 'default-deny-all' policy`,            // uses egress feature
-+			`NetworkPolicy between server and client should stop enforcing policies after they are deleted`, // uses egress feature
 +		},
 +
 +		// These tests are skipped when openshift-tests needs to use a proxy to reach the
@@ -18801,10 +18853,6 @@ index 00000000000..c3091099e92
 +			`\[Feature:StorageProvider\]`,
 +		},
 +
-+		// tests that don't pass under openshift-sdn multitenant mode
-+		"[Skipped:Network/OpenShiftSDN/Multitenant]": {
-+			`\[Feature:NetworkPolicy\]`, // not compatible with multitenant mode
-+		},
 +		// tests that don't pass under OVN Kubernetes
 +		"[Skipped:Network/OVNKubernetes]": {
 +			// ovn-kubernetes does not support named ports
@@ -23592,5 +23640,5 @@ index ad2416ae112..618db09b89f 100644
  		fmt.Sprintf("GOARCH=%s", goarch))
  	tagstr := "selinux"
 -- 
-2.46.0
+2.47.0
 

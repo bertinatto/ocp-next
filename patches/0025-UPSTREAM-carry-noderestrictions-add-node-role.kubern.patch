@@ -1,4 +1,4 @@
-From cdbdec9bc69bdade580112138d12fef5132bcaa6 Mon Sep 17 00:00:00 2001
+From f6c967272aab290163c594d8e08c105417ef3005 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:01 +0100
 Subject: [PATCH] UPSTREAM: <carry>: noderestrictions: add
@@ -22,7 +22,7 @@ Signed-off-by: Harshal Patil <harpatil@redhat.com>
  create mode 100644 staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
 
 diff --git a/cmd/kubelet/app/options/options.go b/cmd/kubelet/app/options/options.go
-index 7102e6bade8..a88b3ae14bb 100644
+index a6efdadb7a9..2aa2fe58796 100644
 --- a/cmd/kubelet/app/options/options.go
 +++ b/cmd/kubelet/app/options/options.go
 @@ -155,6 +155,9 @@ func ValidateKubeletFlags(f *KubeletFlags) error {
@@ -131,5 +131,5 @@ index 00000000000..9535c1702c1
 +	return openshiftNodeLabels.Has(label)
 +}
 -- 
-2.46.0
+2.47.0
 

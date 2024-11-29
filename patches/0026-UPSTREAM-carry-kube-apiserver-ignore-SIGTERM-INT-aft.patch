@@ -1,4 +1,4 @@
-From c919b4018c4a90cfd672d2706b62a35c48940100 Mon Sep 17 00:00:00 2001
+From baff1b347d739587ce94f540f972311043389b0c Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Mon, 8 Feb 2021 18:04:54 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: ignore SIGTERM/INT after
@@ -12,19 +12,20 @@ as library-go.
 
 OpenShift-Rebase-Source: 63ed2006a96
 ---
- cmd/kube-apiserver/app/server.go              |  2 +-
+ cmd/kube-apiserver/app/server.go              |  3 +-
  .../src/k8s.io/apiserver/pkg/server/signal.go | 29 +++++++++++++++++--
- 2 files changed, 28 insertions(+), 3 deletions(-)
+ 2 files changed, 29 insertions(+), 3 deletions(-)
 
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 5fcccd80886..177530747d8 100644
+index 52849ee9603..6c35da14b99 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -152,7 +152,7 @@ cluster's shared state through which all other components interact.`,
+@@ -157,7 +157,8 @@ cluster's shared state through which all other components interact.`,
  			return nil
  		},
  	}
--	cmd.SetContext(genericapiserver.SetupSignalContext())
+-	cmd.SetContext(ctx)
++
 +	cmd.SetContext(genericapiserver.SetupSignalContextNotExiting())
  
  	fs := cmd.Flags()
@@ -88,5 +89,5 @@ index e5334ae4c15..bdd2728f8ab 100644
  
  	return ctx
 -- 
-2.46.0
+2.47.0
 

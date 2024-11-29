@@ -1,0 +1,24 @@
+From 95de7f1405983c000e86ad62efeded1236de5d4a Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Thu, 28 Nov 2024 07:27:30 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
+
+---
+ pkg/kubelet/apis/config/validation/validation_test.go | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
+index 8354fdb2334..a8bcabf8553 100644
+--- a/pkg/kubelet/apis/config/validation/validation_test.go
++++ b/pkg/kubelet/apis/config/validation/validation_test.go
+@@ -614,6 +614,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+ 		}, {
+ 			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
+ 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
++				conf.FeatureGates = map[string]bool{"NodeLogQuery": false}
+ 				conf.EnableSystemLogQuery = true
+ 				return conf
+ 			},
+-- 
+2.47.1
+

@@ -1,4 +1,4 @@
-From c4f91918dec9235e77d751121baf4cc89828c106 Mon Sep 17 00:00:00 2001
+From baa7496e2f0a1bc47976e01b34a9296e6dab3f38 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Wed, 24 Mar 2021 10:18:02 +0100
 Subject: [PATCH] UPSTREAM: <carry>: allows for switching KS to talk to Kube
@@ -67,10 +67,10 @@ index 00000000000..1f2e3ea2c6d
 +	PreferredHostHealthMonitor          *health.Prober
 +}
 diff --git a/cmd/kube-scheduler/app/options/options.go b/cmd/kube-scheduler/app/options/options.go
-index c4dd5df2cf2..45e1d97b11f 100644
+index 95e1c002884..6c3c1cf7ebd 100644
 --- a/cmd/kube-scheduler/app/options/options.go
 +++ b/cmd/kube-scheduler/app/options/options.go
-@@ -51,6 +51,8 @@ import (
+@@ -52,6 +52,8 @@ import (
  	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
  	"k8s.io/kubernetes/pkg/scheduler/apis/config/validation"
  	netutils "k8s.io/utils/net"
@@ -79,7 +79,7 @@ index c4dd5df2cf2..45e1d97b11f 100644
  )
  
  // Options has all the params needed to run a Scheduler
-@@ -79,6 +81,9 @@ type Options struct {
+@@ -80,6 +82,9 @@ type Options struct {
  
  	// Flags hold the parsed CLI flags.
  	Flags *cliflag.NamedFlagSets
@@ -89,7 +89,7 @@ index c4dd5df2cf2..45e1d97b11f 100644
  }
  
  // NewOptions returns default scheduler app options.
-@@ -195,6 +200,7 @@ func (o *Options) initFlags() {
+@@ -196,6 +201,7 @@ func (o *Options) initFlags() {
  	fs.StringVar(&o.ConfigFile, "config", o.ConfigFile, "The path to the configuration file.")
  	fs.StringVar(&o.WriteConfigTo, "write-config-to", o.WriteConfigTo, "If set, write the configuration values to this file and exit.")
  	fs.StringVar(&o.Master, "master", o.Master, "The address of the Kubernetes API server (overrides any value in kubeconfig)")
@@ -97,7 +97,7 @@ index c4dd5df2cf2..45e1d97b11f 100644
  
  	o.SecureServing.AddFlags(nfs.FlagSet("secure serving"))
  	o.Authentication.AddFlags(nfs.FlagSet("authentication"))
-@@ -240,6 +246,10 @@ func (o *Options) ApplyTo(logger klog.Logger, c *schedulerappconfig.Config) erro
+@@ -241,6 +247,10 @@ func (o *Options) ApplyTo(logger klog.Logger, c *schedulerappconfig.Config) erro
  	if err != nil {
  		return err
  	}
@@ -212,10 +212,10 @@ index 00000000000..bcdf678774c
 +	return &restConfigCopy
 +}
 diff --git a/cmd/kube-scheduler/app/server.go b/cmd/kube-scheduler/app/server.go
-index ce5a8bd9a52..424d0e99a7d 100644
+index e1ccda21e20..7f23cfef338 100644
 --- a/cmd/kube-scheduler/app/server.go
 +++ b/cmd/kube-scheduler/app/server.go
-@@ -150,6 +150,11 @@ func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Op
+@@ -149,6 +149,11 @@ func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Op
  		cancel()
  	}()
  
@@ -227,7 +227,7 @@ index ce5a8bd9a52..424d0e99a7d 100644
  	cc, sched, err := Setup(ctx, opts, registryOptions...)
  	if err != nil {
  		return err
-@@ -168,6 +173,11 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
+@@ -167,6 +172,11 @@ func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *
  
  	logger.Info("Golang settings", "GOGC", os.Getenv("GOGC"), "GOMAXPROCS", os.Getenv("GOMAXPROCS"), "GOTRACEBACK", os.Getenv("GOTRACEBACK"))
  
@@ -237,8 +237,8 @@ index ce5a8bd9a52..424d0e99a7d 100644
 +	}
 +
  	// Configz registration.
- 	if cz, err := configz.New("componentconfig"); err == nil {
- 		cz.Set(cc.ComponentConfig)
+ 	if cz, err := configz.New("componentconfig"); err != nil {
+ 		return fmt.Errorf("unable to register configz: %s", err)
 -- 
-2.46.0
+2.47.0
 

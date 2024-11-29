@@ -1,4 +1,4 @@
-From 83a6a0629749530a2d93c0c026e1b1ba0b3d4621 Mon Sep 17 00:00:00 2001
+From d05d9667a13c54e999ea92523b8f737ba62b4ab5 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -213,20 +213,25 @@ OpenShift-Rebase-Source: 56b49c9c143
 OpenShift-Rebase-Source: bcf574c65d1
 
 UPSTREAM: <carry>: openshift-kube-apiserver: add kube-apiserver patches
+
+UPSTREAM: <carry>: openshift-kube-apiserver: add kube-apiserver patches
+
+initialize DefaultComponentGlobalsRegistry after feature gates have been
+parsed from the config
 ---
  cmd/kube-apiserver/app/options/options.go     |   6 ++
- cmd/kube-apiserver/app/server.go              |  33 +++++++++
+ cmd/kube-apiserver/app/server.go              |  37 ++++++++++
  pkg/controlplane/apiserver/config.go          |  15 ++++
  pkg/kubeapiserver/authorizer/config.go        |   4 ++
  pkg/kubeapiserver/authorizer/modes/patch.go   |   8 +++
  pkg/kubeapiserver/authorizer/patch.go         |   8 +++
- pkg/kubeapiserver/authorizer/reload.go        |  26 +++++--
+ pkg/kubeapiserver/authorizer/reload.go        |  28 +++++---
  .../rbac/bootstrappolicy/controller_policy.go |   2 +
  .../rbac/bootstrappolicy/patch_policy.go      |  65 ++++++++++++++++++
  .../authorizer/rbac/bootstrappolicy/policy.go |   6 +-
  .../testdata/controller-roles.yaml            |  12 ++++
  .../go-runner/testdata/tartest/out.tar.gz     | Bin 0 -> 174 bytes
- 12 files changed, 175 insertions(+), 10 deletions(-)
+ 12 files changed, 180 insertions(+), 11 deletions(-)
  create mode 100644 pkg/kubeapiserver/authorizer/modes/patch.go
  create mode 100644 pkg/kubeapiserver/authorizer/patch.go
  create mode 100644 plugin/pkg/auth/authorizer/rbac/bootstrappolicy/patch_policy.go
@@ -256,7 +261,7 @@ index ebed12af1d6..17c940a734d 100644
  	return fss
  }
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index fad0f1e9579..5fcccd80886 100644
+index 8aa05a4d8f8..52849ee9603 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
 @@ -25,6 +25,10 @@ import (
@@ -270,7 +275,7 @@ index fad0f1e9579..5fcccd80886 100644
  	"github.com/spf13/cobra"
  	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
  	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-@@ -96,6 +100,35 @@ cluster's shared state through which all other components interact.`,
+@@ -97,6 +101,39 @@ cluster's shared state through which all other components interact.`,
  			}
  			cliflag.PrintFlags(fs)
  
@@ -293,6 +298,10 @@ index fad0f1e9579..5fcccd80886 100644
 +				if err := cmd.ParseFlags(args); err != nil {
 +					return err
 +				}
++				// initialize feature gates again with the new flags
++				if err := utilversion.DefaultComponentGlobalsRegistry.Set(); err != nil {
++					return err
++				}
 +
 +				// print merged flags (merged from OpenshiftConfig)
 +				cliflag.PrintFlags(cmd.Flags())
@@ -304,10 +313,10 @@ index fad0f1e9579..5fcccd80886 100644
 +			}
 +
  			// set default options
- 			completedOptions, err := s.Complete()
+ 			completedOptions, err := s.Complete(ctx)
  			if err != nil {
 diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index c204e5058ef..568d0c138a6 100644
+index aed7e6866ec..98779d69358 100644
 --- a/pkg/controlplane/apiserver/config.go
 +++ b/pkg/controlplane/apiserver/config.go
 @@ -25,6 +25,10 @@ import (
@@ -321,7 +330,7 @@ index c204e5058ef..568d0c138a6 100644
  	"k8s.io/apimachinery/pkg/api/meta"
  	"k8s.io/apimachinery/pkg/runtime"
  	utilnet "k8s.io/apimachinery/pkg/util/net"
-@@ -137,6 +141,8 @@ func BuildGenericConfig(
+@@ -139,6 +143,8 @@ func BuildGenericConfig(
  	// on a fast local network
  	genericConfig.LoopbackClientConfig.DisableCompression = true
  
@@ -330,7 +339,7 @@ index c204e5058ef..568d0c138a6 100644
  	kubeClientConfig := genericConfig.LoopbackClientConfig
  	clientgoExternalClient, err := clientgoclientset.NewForConfig(kubeClientConfig)
  	if err != nil {
-@@ -356,6 +362,15 @@ func CreateConfig(
+@@ -360,6 +366,15 @@ func CreateConfig(
  	if err != nil {
  		return nil, nil, fmt.Errorf("failed to create real dynamic external client: %w", err)
  	}
@@ -347,18 +356,18 @@ index c204e5058ef..568d0c138a6 100644
  		genericConfig,
  		versionedInformers,
 diff --git a/pkg/kubeapiserver/authorizer/config.go b/pkg/kubeapiserver/authorizer/config.go
-index e654ed317f6..314ee9ff5e3 100644
+index 7a778ebd867..d3b35416469 100644
 --- a/pkg/kubeapiserver/authorizer/config.go
 +++ b/pkg/kubeapiserver/authorizer/config.go
-@@ -34,6 +34,7 @@ import (
+@@ -35,6 +35,7 @@ import (
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
  	versionedinformers "k8s.io/client-go/informers"
- 	resourceinformers "k8s.io/client-go/informers/resource/v1alpha3"
+ 	resourceinformers "k8s.io/client-go/informers/resource/v1beta1"
 +	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/scopeauthorizer"
  	"k8s.io/kubernetes/pkg/auth/authorizer/abac"
  	"k8s.io/kubernetes/pkg/auth/nodeidentifier"
  	"k8s.io/kubernetes/pkg/features"
-@@ -122,6 +123,9 @@ func (config Config) New(ctx context.Context, serverID string) (authorizer.Autho
+@@ -126,6 +127,9 @@ func (config Config) New(ctx context.Context, serverID string) (authorizer.Autho
  				&rbac.ClusterRoleGetter{Lister: config.VersionedInformerFactory.Rbac().V1().ClusterRoles().Lister()},
  				&rbac.ClusterRoleBindingLister{Lister: config.VersionedInformerFactory.Rbac().V1().ClusterRoleBindings().Lister()},
  			)
@@ -397,7 +406,7 @@ index 00000000000..8a095efcf98
 +	skipSystemMastersAuthorizer = true
 +}
 diff --git a/pkg/kubeapiserver/authorizer/reload.go b/pkg/kubeapiserver/authorizer/reload.go
-index afd3ca76be6..575fba1b486 100644
+index 2e3525686bd..381765d81c3 100644
 --- a/pkg/kubeapiserver/authorizer/reload.go
 +++ b/pkg/kubeapiserver/authorizer/reload.go
 @@ -27,6 +27,8 @@ import (
@@ -409,21 +418,23 @@ index afd3ca76be6..575fba1b486 100644
  	"k8s.io/apimachinery/pkg/util/sets"
  	authzconfig "k8s.io/apiserver/pkg/apis/apiserver"
  	"k8s.io/apiserver/pkg/authentication/user"
-@@ -58,9 +60,10 @@ type reloadableAuthorizerResolver struct {
+@@ -58,10 +60,11 @@ type reloadableAuthorizerResolver struct {
  	reloadInterval         time.Duration
  	requireNonWebhookTypes sets.Set[authzconfig.AuthorizerType]
  
 -	nodeAuthorizer *node.NodeAuthorizer
 -	rbacAuthorizer *rbac.RBACAuthorizer
 -	abacAuthorizer abac.PolicyList
+-	compiler       authorizationcel.Compiler // non-nil and shared across reloads.
 +	nodeAuthorizer         *node.NodeAuthorizer
 +	rbacAuthorizer         *rbac.RBACAuthorizer
 +	scopeLimitedAuthorizer authorizer.Authorizer
 +	abacAuthorizer         abac.PolicyList
++	compiler               authorizationcel.Compiler // non-nil and shared across reloads.
  
  	lastLoadedLock   sync.Mutex
  	lastLoadedConfig *authzconfig.AuthorizationConfiguration
-@@ -93,9 +96,11 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
+@@ -94,9 +97,11 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
  		ruleResolvers []authorizer.RuleResolver
  	)
  
@@ -438,7 +449,7 @@ index afd3ca76be6..575fba1b486 100644
  
  	for _, configuredAuthorizer := range authzConfig.Authorizers {
  		// Keep cases in sync with constant list in k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes/modes.go.
-@@ -159,8 +164,15 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
+@@ -161,8 +166,15 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
  			if r.rbacAuthorizer == nil {
  				return nil, nil, fmt.Errorf("authorizer type RBAC is not allowed if it was not enabled at initial server startup")
  			}
@@ -456,7 +467,7 @@ index afd3ca76be6..575fba1b486 100644
  			return nil, nil, fmt.Errorf("unknown authorization mode %s specified", configuredAuthorizer.Type)
  		}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-index ea28632ccf6..f7c80688ce7 100644
+index 5d6e31dec44..5da84f7d7f8 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 @@ -160,6 +160,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
@@ -547,10 +558,10 @@ index 00000000000..8f91d44c9c8
 +	return bindings
 +}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index 4c203379e1f..2d9c4d74b10 100644
+index 947d043de46..0332c5295d6 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-@@ -192,8 +192,8 @@ func NodeRules() []rbacv1.PolicyRule {
+@@ -193,8 +193,8 @@ func NodeRules() []rbacv1.PolicyRule {
  	return nodePolicyRules
  }
  
@@ -558,10 +569,10 @@ index 4c203379e1f..2d9c4d74b10 100644
 -func ClusterRoles() []rbacv1.ClusterRole {
 +// clusterRoles returns the cluster roles to bootstrap an API server with
 +func clusterRoles() []rbacv1.ClusterRole {
- 	roles := []rbacv1.ClusterRole{
- 		{
- 			// a "root" role which can do absolutely anything
-@@ -612,7 +612,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
+ 	monitoringRules := []rbacv1.PolicyRule{
+ 		rbacv1helpers.NewRule("get").URLs(
+ 			"/metrics", "/metrics/slis",
+@@ -630,7 +630,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
  const systemNodeRoleName = "system:node"
  
  // ClusterRoleBindings return default rolebindings to the default roles
@@ -571,7 +582,7 @@ index 4c203379e1f..2d9c4d74b10 100644
  		rbacv1helpers.NewClusterBinding("cluster-admin").Groups(user.SystemPrivilegedGroup).BindingOrDie(),
  		rbacv1helpers.NewClusterBinding("system:monitoring").Groups(user.MonitoringGroup).BindingOrDie(),
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
-index 72471fad12e..4188fe4fc2d 100644
+index c3c941a0b9b..0a4f2363775 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 @@ -517,6 +517,12 @@ items:
@@ -614,5 +625,5 @@ literal 0
 HcmV?d00001
 
 -- 
-2.46.0
+2.47.0
 

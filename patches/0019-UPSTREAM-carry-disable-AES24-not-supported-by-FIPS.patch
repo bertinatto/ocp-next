@@ -1,4 +1,4 @@
-From 9ea30a5edd054d6b89b4fd1ec3da1bbdea0a05d4 Mon Sep 17 00:00:00 2001
+From 7bb2b55998925d401c49952911103e09f35c8433 Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <rphillips@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: disable AES24, not supported by FIPS
@@ -40,5 +40,5 @@ index 65c10bdd0de..a2e5a927892 100644
  		{name: "GCM 32 byte seed", t: newHKDFExtendedNonceGCMTransformerTest(t, nil, key32)},
  		{name: "CBC 32 byte key", t: NewCBCTransformer(aes32block)},
 -- 
-2.46.0
+2.47.0
 

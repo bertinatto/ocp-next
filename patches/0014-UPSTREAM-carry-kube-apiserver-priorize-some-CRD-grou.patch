@@ -1,4 +1,4 @@
-From 9c4776c626e99d3670510b45e12a4d0b5cc30cd7 Mon Sep 17 00:00:00 2001
+From 1a7dedadabe267e660e0bb1f5ac41122b6cf44f3 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: priorize some CRD groups
@@ -45,5 +45,5 @@ index 00000000000..ea989b6e1ed
 +	}
 +}
 -- 
-2.46.0
+2.47.0
 

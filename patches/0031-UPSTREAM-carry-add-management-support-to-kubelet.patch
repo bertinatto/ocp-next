@@ -1,4 +1,4 @@
-From 9239d6e9d0adab002753d3d0538e3e548c05b1f8 Mon Sep 17 00:00:00 2001
+From 921875a6f6e4071a302a1483642b523ea8015a8c Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Mon, 29 Mar 2021 12:02:13 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add management support to kubelet
@@ -49,8 +49,8 @@ test: add unit tests for error states
 Signed-off-by: ehila <ehila@redhat.com>
 ---
  pkg/kubelet/cm/cpumanager/cpu_manager.go      |   6 +
- pkg/kubelet/cm/cpumanager/policy_static.go    |  21 +-
- .../cm/cpumanager/policy_static_test.go       |  48 +-
+ pkg/kubelet/cm/cpumanager/policy_static.go    |  22 +-
+ .../cm/cpumanager/policy_static_test.go       |  49 +-
  pkg/kubelet/cm/qos_container_manager_linux.go |   4 +
  pkg/kubelet/config/file.go                    |  11 +
  pkg/kubelet/kubelet.go                        |   5 +
@@ -58,13 +58,13 @@ Signed-off-by: ehila <ehila@redhat.com>
  pkg/kubelet/managed/cpu_shares.go             |  30 +
  pkg/kubelet/managed/managed.go                | 204 ++++++
  pkg/kubelet/managed/managed_test.go           | 675 ++++++++++++++++++
- 10 files changed, 1017 insertions(+), 14 deletions(-)
+ 10 files changed, 1017 insertions(+), 16 deletions(-)
  create mode 100644 pkg/kubelet/managed/cpu_shares.go
  create mode 100644 pkg/kubelet/managed/managed.go
  create mode 100644 pkg/kubelet/managed/managed_test.go
 
 diff --git a/pkg/kubelet/cm/cpumanager/cpu_manager.go b/pkg/kubelet/cm/cpumanager/cpu_manager.go
-index 8b5049d7d74..affaf97da8c 100644
+index 9e72a7cc97a..6b1a34165b5 100644
 --- a/pkg/kubelet/cm/cpumanager/cpu_manager.go
 +++ b/pkg/kubelet/cm/cpumanager/cpu_manager.go
 @@ -35,6 +35,7 @@ import (
@@ -75,7 +75,7 @@ index 8b5049d7d74..affaf97da8c 100644
  	"k8s.io/kubernetes/pkg/kubelet/status"
  	"k8s.io/utils/cpuset"
  )
-@@ -407,6 +408,7 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
+@@ -409,6 +410,7 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
  	failure = []reconciledContainer{}
  
  	m.removeStaleState()
@@ -83,7 +83,7 @@ index 8b5049d7d74..affaf97da8c 100644
  	for _, pod := range m.activePods() {
  		pstatus, ok := m.podStatusProvider.GetPodStatus(pod.UID)
  		if !ok {
-@@ -414,6 +416,10 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
+@@ -416,6 +418,10 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
  			failure = append(failure, reconciledContainer{pod.Name, "", ""})
  			continue
  		}
@@ -95,7 +95,7 @@ index 8b5049d7d74..affaf97da8c 100644
  		allContainers := pod.Spec.InitContainers
  		allContainers = append(allContainers, pod.Spec.Containers...)
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static.go b/pkg/kubelet/cm/cpumanager/policy_static.go
-index 049e35f9883..2d40c5cc2bf 100644
+index a8cbf634690..ed6c6fbfea1 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static.go
 @@ -29,6 +29,7 @@ import (
@@ -106,10 +106,10 @@ index 049e35f9883..2d40c5cc2bf 100644
  	"k8s.io/kubernetes/pkg/kubelet/metrics"
  	"k8s.io/kubernetes/pkg/kubelet/types"
  	"k8s.io/utils/cpuset"
-@@ -203,6 +204,10 @@ func (p *staticPolicy) validateState(s state.State) error {
+@@ -215,6 +216,10 @@ func (p *staticPolicy) validateState(s state.State) error {
  		// state is empty initialize
- 		allCPUs := p.topology.CPUDetails.CPUs()
  		s.SetDefaultCPUSet(allCPUs)
+ 		klog.InfoS("Static policy initialized", "defaultCPUSet", allCPUs)
 +		if managed.IsEnabled() {
 +			defaultCpus := s.GetDefaultCPUSet().Difference(p.reservedCPUs)
 +			s.SetDefaultCPUSet(defaultCpus)
@@ -117,24 +117,26 @@ index 049e35f9883..2d40c5cc2bf 100644
  		return nil
  	}
  
-@@ -210,7 +215,9 @@ func (p *staticPolicy) validateState(s state.State) error {
- 	// 1. Check if the reserved cpuset is not part of default cpuset because:
- 	// - kube/system reserved have changed (increased) - may lead to some containers not being able to start
- 	// - user tampered with file
--	if !p.reservedCPUs.Intersection(tmpDefaultCPUset).Equals(p.reservedCPUs) {
-+	// 2. This only applies when managed mode is disabled. Active workload partitioning feature
-+	//    removes the reserved cpus from the default cpu mask on purpose.
-+	if !managed.IsEnabled() && !p.reservedCPUs.Intersection(tmpDefaultCPUset).Equals(p.reservedCPUs) {
- 		return fmt.Errorf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
- 			p.reservedCPUs.String(), tmpDefaultCPUset.String())
- 	}
-@@ -241,9 +248,17 @@ func (p *staticPolicy) validateState(s state.State) error {
+@@ -228,7 +233,9 @@ func (p *staticPolicy) validateState(s state.State) error {
+ 				p.reservedCPUs.Intersection(tmpDefaultCPUset).String(), tmpDefaultCPUset.String())
+ 		}
+ 	} else {
+-		if !p.reservedCPUs.Intersection(tmpDefaultCPUset).Equals(p.reservedCPUs) {
++		// 2. This only applies when managed mode is disabled. Active workload partitioning feature
++		//    removes the reserved cpus from the default cpu mask on purpose.
++		if !managed.IsEnabled() && !p.reservedCPUs.Intersection(tmpDefaultCPUset).Equals(p.reservedCPUs) {
+ 			return fmt.Errorf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
+ 				p.reservedCPUs.String(), tmpDefaultCPUset.String())
+ 		}
+@@ -260,10 +267,17 @@ func (p *staticPolicy) validateState(s state.State) error {
  		}
  	}
  	totalKnownCPUs = totalKnownCPUs.Union(tmpCPUSets...)
--	if !totalKnownCPUs.Equals(p.topology.CPUDetails.CPUs()) {
+-	if !totalKnownCPUs.Equals(allCPUs) {
+-		return fmt.Errorf("current set of available CPUs \"%s\" doesn't match with CPUs in state \"%s\"",
+-			allCPUs.String(), totalKnownCPUs.String())
 +	availableCPUs := p.topology.CPUDetails.CPUs()
-+
+ 
 +	// CPU (workload) partitioning removes reserved cpus
 +	// from the default mask intentionally
 +	if managed.IsEnabled() {
@@ -142,14 +144,13 @@ index 049e35f9883..2d40c5cc2bf 100644
 +	}
 +
 +	if !totalKnownCPUs.Equals(availableCPUs) {
- 		return fmt.Errorf("current set of available CPUs \"%s\" doesn't match with CPUs in state \"%s\"",
--			p.topology.CPUDetails.CPUs().String(), totalKnownCPUs.String())
++		return fmt.Errorf("current set of available CPUs \"%s\" doesn't match with CPUs in state \"%s\"",
 +			availableCPUs.String(), totalKnownCPUs.String())
  	}
  
  	return nil
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static_test.go b/pkg/kubelet/cm/cpumanager/policy_static_test.go
-index bcd1e19ba29..f86b01d9ea7 100644
+index 9e9618873cd..87983038f91 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static_test.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static_test.go
 @@ -21,6 +21,8 @@ import (
@@ -161,25 +162,27 @@ index bcd1e19ba29..f86b01d9ea7 100644
  	v1 "k8s.io/api/core/v1"
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
  	featuregatetesting "k8s.io/component-base/featuregate/testing"
-@@ -939,17 +941,18 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
+@@ -961,18 +963,19 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
  // above test cases are without kubelet --reserved-cpus cmd option
  // the following tests are with --reserved-cpus configured
  type staticPolicyTestWithResvList struct {
--	description     string
--	topo            *topology.CPUTopology
--	numReservedCPUs int
--	reserved        cpuset.CPUSet
--	stAssignments   state.ContainerCPUAssignments
--	stDefaultCPUSet cpuset.CPUSet
--	pod             *v1.Pod
--	expErr          error
--	expNewErr       error
--	expCPUAlloc     bool
--	expCSet         cpuset.CPUSet
+-	description      string
+-	topo             *topology.CPUTopology
+-	numReservedCPUs  int
+-	reserved         cpuset.CPUSet
+-	cpuPolicyOptions map[string]string
+-	stAssignments    state.ContainerCPUAssignments
+-	stDefaultCPUSet  cpuset.CPUSet
+-	pod              *v1.Pod
+-	expErr           error
+-	expNewErr        error
+-	expCPUAlloc      bool
+-	expCSet          cpuset.CPUSet
 +	description         string
 +	topo                *topology.CPUTopology
 +	numReservedCPUs     int
 +	reserved            cpuset.CPUSet
++	cpuPolicyOptions    map[string]string
 +	stAssignments       state.ContainerCPUAssignments
 +	stDefaultCPUSet     cpuset.CPUSet
 +	pod                 *v1.Pod
@@ -191,7 +194,7 @@ index bcd1e19ba29..f86b01d9ea7 100644
  }
  
  func TestStaticPolicyStartWithResvList(t *testing.T) {
-@@ -981,9 +984,32 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
+@@ -1024,9 +1027,31 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
  			stDefaultCPUSet: cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
  			expNewErr:       fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of 0-1 did not equal 1)"),
  		},
@@ -220,16 +223,15 @@ index bcd1e19ba29..f86b01d9ea7 100644
 +			defer func() {
 +				managed.TestOnlySetEnabled(wasManaged)
 +			}()
-+
- 			p, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), nil)
+ 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUManagerPolicyAlphaOptions, true)
+ 			p, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), testCase.cpuPolicyOptions)
  			if !reflect.DeepEqual(err, testCase.expNewErr) {
- 				t.Errorf("StaticPolicy Start() error (%v). expected error: %v but got: %v",
 diff --git a/pkg/kubelet/cm/qos_container_manager_linux.go b/pkg/kubelet/cm/qos_container_manager_linux.go
-index a740acbbb49..0fa8cb55b3e 100644
+index 441aa952b65..85e509d4f63 100644
 --- a/pkg/kubelet/cm/qos_container_manager_linux.go
 +++ b/pkg/kubelet/cm/qos_container_manager_linux.go
 @@ -35,6 +35,7 @@ import (
- 	"k8s.io/kubernetes/pkg/api/v1/resource"
+ 	"k8s.io/component-helpers/resource"
  	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
  	kubefeatures "k8s.io/kubernetes/pkg/features"
 +	"k8s.io/kubernetes/pkg/kubelet/managed"
@@ -276,10 +278,10 @@ index 79e2af6ed62..d2526ec989d 100644
  	}
  
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index b2f5fd1d01e..3cd0c0a2b36 100644
+index 64f4cc9c0dd..ff22172032d 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -89,6 +89,7 @@ import (
+@@ -90,6 +90,7 @@ import (
  	"k8s.io/kubernetes/pkg/kubelet/kuberuntime"
  	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
  	"k8s.io/kubernetes/pkg/kubelet/logs"
@@ -287,7 +289,7 @@ index b2f5fd1d01e..3cd0c0a2b36 100644
  	"k8s.io/kubernetes/pkg/kubelet/metrics"
  	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
  	"k8s.io/kubernetes/pkg/kubelet/network/dns"
-@@ -630,6 +631,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
+@@ -639,6 +640,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
  
  	klet.runtimeService = kubeDeps.RemoteRuntimeService
  
@@ -299,20 +301,20 @@ index b2f5fd1d01e..3cd0c0a2b36 100644
  		klet.runtimeClassManager = runtimeclass.NewManager(kubeDeps.KubeClient)
  	}
 diff --git a/pkg/kubelet/kubelet_node_status.go b/pkg/kubelet/kubelet_node_status.go
-index ce3b3afa83f..a9576078ef8 100644
+index ebe36617f05..94529e9addb 100644
 --- a/pkg/kubelet/kubelet_node_status.go
 +++ b/pkg/kubelet/kubelet_node_status.go
-@@ -38,7 +38,9 @@ import (
- 	"k8s.io/klog/v2"
+@@ -41,7 +41,9 @@ import (
  	kubeletapis "k8s.io/kubelet/pkg/apis"
  	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+ 	"k8s.io/kubernetes/pkg/features"
 +	"k8s.io/kubernetes/pkg/kubelet/cadvisor"
  	"k8s.io/kubernetes/pkg/kubelet/events"
 +	"k8s.io/kubernetes/pkg/kubelet/managed"
  	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
  	taintutil "k8s.io/kubernetes/pkg/util/taints"
  	volutil "k8s.io/kubernetes/pkg/volume/util"
-@@ -117,6 +119,9 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
+@@ -130,6 +132,9 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
  	requiresUpdate = kl.updateDefaultLabels(node, existingNode) || requiresUpdate
  	requiresUpdate = kl.reconcileExtendedResource(node, existingNode) || requiresUpdate
  	requiresUpdate = kl.reconcileHugePageResource(node, existingNode) || requiresUpdate
@@ -322,7 +324,7 @@ index ce3b3afa83f..a9576078ef8 100644
  	if requiresUpdate {
  		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, existingNode); err != nil {
  			klog.ErrorS(err, "Unable to reconcile node with API server,error updating node", "node", klog.KObj(node))
-@@ -127,6 +132,25 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
+@@ -140,6 +145,25 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
  	return true
  }
  
@@ -348,7 +350,7 @@ index ce3b3afa83f..a9576078ef8 100644
  // reconcileHugePageResource will update huge page capacity for each page size and remove huge page sizes no longer supported
  func (kl *Kubelet) reconcileHugePageResource(initialNode, existingNode *v1.Node) bool {
  	requiresUpdate := updateDefaultResources(initialNode, existingNode)
-@@ -418,6 +442,9 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
+@@ -431,6 +455,9 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
  			}
  		}
  	}
@@ -1286,5 +1288,5 @@ index 00000000000..16acda0868c
 +	return pod
 +}
 -- 
-2.46.0
+2.47.0
 

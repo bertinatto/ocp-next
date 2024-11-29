@@ -1,0 +1,24 @@
+From dfbdc111b890a0f13c271b9c469139334d6027ee Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 27 Nov 2024 13:51:42 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ openshift-hack/images/hyperkube/Dockerfile.rhel | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
+index 2e938964307..0eeb125685c 100644
+--- a/openshift-hack/images/hyperkube/Dockerfile.rhel
++++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
+@@ -14,4 +14,4 @@ COPY --from=builder /tmp/build/* /usr/bin/
+ LABEL io.k8s.display-name="OpenShift Kubernetes Server Commands" \
+       io.k8s.description="OpenShift is a platform for developing, building, and deploying containerized applications." \
+       io.openshift.tags="openshift,hyperkube" \
+-      io.openshift.build.versions="kubernetes=1.31.0"
++      io.openshift.build.versions="kubernetes=1.32.0"
+\ No newline at end of file
+-- 
+2.47.0
+

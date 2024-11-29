@@ -1,4 +1,4 @@
-From 3d4a1e7bdea3ac8289f734e548a713ab8ebc34f6 Mon Sep 17 00:00:00 2001
+From ec29a8468415c2b1629be38301397f0775da2f2f Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: filter out CustomResourceQuota paths from
@@ -65,5 +65,5 @@ index 12c8b1ad910..13982b7b4ce 100644
  	openAPIVersionedService := handler.NewOpenAPIService(spec)
  	openAPIVersionedService.RegisterOpenAPIVersionedService("/openapi/v2", mux)
 -- 
-2.46.0
+2.47.0
 

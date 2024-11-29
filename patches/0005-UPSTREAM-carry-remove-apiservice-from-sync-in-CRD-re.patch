@@ -1,4 +1,4 @@
-From 72fe51a097a7c525f7c61ed2b635948520695843 Mon Sep 17 00:00:00 2001
+From 0044b8517f8bb56a770c16ae248b84b9a3b25847 Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: remove apiservice from sync in CRD
@@ -25,5 +25,5 @@ index 8cd7a7c8bb7..f1410fd3031 100644
  	}
  
 -- 
-2.46.0
+2.47.0
 

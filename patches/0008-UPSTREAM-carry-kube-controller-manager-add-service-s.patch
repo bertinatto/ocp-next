@@ -1,4 +1,4 @@
-From 7d300df0b258721f138a3e43ed668596d33f3c04 Mon Sep 17 00:00:00 2001
+From 2da7b0229b332fa80332ff266146f3fada032adc Mon Sep 17 00:00:00 2001
 From: deads2k <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: add service
@@ -107,5 +107,5 @@ index dfacea8acfa..e974e842d9c 100644
  	if needsNamespace {
  		liveSecret.Data[v1.ServiceAccountNamespaceKey] = []byte(liveSecret.Namespace)
 -- 
-2.46.0
+2.47.0
 

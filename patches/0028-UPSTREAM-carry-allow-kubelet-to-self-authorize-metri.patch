@@ -1,4 +1,4 @@
-From d447f4c9afd40abb9447096d401ca41fffd42d47 Mon Sep 17 00:00:00 2001
+From aa3e36dd0697b34b1c4e76186401b909d9e9293d Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Mon, 1 Mar 2021 16:10:32 -0500
 Subject: [PATCH] UPSTREAM: <carry>: allow kubelet to self-authorize metrics
@@ -47,5 +47,5 @@ index 00000000000..04d860cf5e6
 +	)
 +}
 -- 
-2.46.0
+2.47.0
 

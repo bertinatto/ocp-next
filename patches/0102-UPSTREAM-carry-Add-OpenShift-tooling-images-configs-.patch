@@ -1,0 +1,27 @@
+From d0e395a5106f4d542eda3e2d9340397ea30c89bd Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Thu, 28 Nov 2024 10:13:05 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ hack/make-rules/test.sh | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
+index afddf8df982..d2326809a34 100755
+--- a/hack/make-rules/test.sh
++++ b/hack/make-rules/test.sh
+@@ -52,7 +52,8 @@ kube::test::find_go_packages() {
+             -e '^k8s.io/kubernetes/test/e2e$' \
+             -e '^k8s.io/kubernetes/test/e2e_node(/.*)?$' \
+             -e '^k8s.io/kubernetes/test/e2e_kubeadm(/.*)?$' \
+-            -e '^k8s.io/.*/test/integration(/.*)?$'
++            -e '^k8s.io/.*/test/integration(/.*)?$' \
++            -e '^k8s.io/kubernetes/openshift-hack/e2e(/.*)?$'
+   )
+ }
+ 
+-- 
+2.47.1
+

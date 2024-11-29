@@ -1,0 +1,1047 @@
+From 257da6db07c802f18a41a97a5d5f4ce4ce037ff3 Mon Sep 17 00:00:00 2001
+From: Talor Itzhak <titzhak@redhat.com>
+Date: Sun, 12 Nov 2023 09:33:47 +0200
+Subject: [PATCH] UPSTREAM: <carry>: add new admission for handling shared cpus
+
+Adding a new mutation plugin that handles the following:
+
+1. In case of `workload.openshift.io/enable-shared-cpus` request, it
+   adds an annotation to hint runtime about the request. runtime
+   is not aware of extended resources, hence we need the annotation.
+2. It validates the pod's QoS class and return an error if it's not a
+   guaranteed QoS class
+3. It validates that no more than a single resource is being request.
+4. It validates that the pod deployed in a namespace that has mixedcpus
+   workloads allowed annotation.
+
+For more information see - openshift/enhancements#1396
+
+Signed-off-by: Talor Itzhak <titzhak@redhat.com>
+
+UPSTREAM: <carry>: Update management webhook pod admission logic
+
+Updating the logic for pod admission to allow a pod creation with workload partitioning annotations to be run in a namespace that has no workload allow annoations.
+
+The pod will be stripped of its workload annotations and treated as if it were normal, a warning annoation will be placed to note the behavior on the pod.
+
+Signed-off-by: ehila <ehila@redhat.com>
+
+UPSTREAM: <carry>: add support for cpu limits into management workloads
+
+Added support to allow workload partitioning to use the CPU limits for a container, to allow the runtime to make better decisions around workload cpu quotas we are passing down the cpu limit as part of the cpulimit value in the annotation. CRI-O will take that information and calculate the quota per node. This should support situations where workloads might have different cpu period overrides assigned.
+
+Updated kubelet for static pods and the admission webhook for regular to support cpu limits.
+
+Updated unit test to reflect changes.
+
+Signed-off-by: ehila <ehila@redhat.com>
+---
+ .../admission/admissionenablement/register.go |   3 +
+ .../managementcpusoverride/admission.go       |  88 ++++---
+ .../managementcpusoverride/admission_test.go  |  85 +++---
+ .../autoscaling/mixedcpus/admission.go        | 152 +++++++++++
+ .../autoscaling/mixedcpus/admission_test.go   | 243 ++++++++++++++++++
+ .../admission/autoscaling/mixedcpus/doc.go    |  10 +
+ pkg/kubelet/managed/managed.go                |   6 +
+ pkg/kubelet/managed/managed_test.go           | 138 +++++++++-
+ 8 files changed, 660 insertions(+), 65 deletions(-)
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+ create mode 100644 openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+
+diff --git a/openshift-kube-apiserver/admission/admissionenablement/register.go b/openshift-kube-apiserver/admission/admissionenablement/register.go
+index e652a88010f..e04020266b8 100644
+--- a/openshift-kube-apiserver/admission/admissionenablement/register.go
++++ b/openshift-kube-apiserver/admission/admissionenablement/register.go
+@@ -5,6 +5,7 @@ import (
+ 	"k8s.io/apiserver/pkg/admission"
+ 	"k8s.io/apiserver/pkg/admission/plugin/resourcequota"
+ 	mutatingwebhook "k8s.io/apiserver/pkg/admission/plugin/webhook/mutating"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/mixedcpus"
+ 
+ 	"github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy"
+ 	imagepolicyapiv1 "github.com/openshift/apiserver-library-go/pkg/admission/imagepolicy/apis/imagepolicy/v1"
+@@ -32,6 +33,7 @@ func RegisterOpenshiftKubeAdmissionPlugins(plugins *admission.Plugins) {
+ 	ingressadmission.Register(plugins)
+ 	managementcpusoverride.Register(plugins)
+ 	managednode.Register(plugins)
++	mixedcpus.Register(plugins)
+ 	projectnodeenv.Register(plugins)
+ 	quotaclusterresourceoverride.Register(plugins)
+ 	quotaclusterresourcequota.Register(plugins)
+@@ -74,6 +76,7 @@ var (
+ 		hostassignment.PluginName,          // "route.openshift.io/RouteHostAssignment"
+ 		csiinlinevolumesecurity.PluginName, // "storage.openshift.io/CSIInlineVolumeSecurity"
+ 		managednode.PluginName,             // "autoscaling.openshift.io/ManagedNode"
++		mixedcpus.PluginName,               // "autoscaling.openshift.io/MixedCPUs"
+ 	}
+ 
+ 	// openshiftAdmissionPluginsForKubeAfterResourceQuota are the plugins to add after ResourceQuota plugin
+diff --git a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+index c672aeced20..9bf0a1f8a1c 100644
+--- a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
++++ b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission.go
+@@ -71,6 +71,14 @@ func Register(plugins *admission.Plugins) {
+ 		})
+ }
+ 
++type resourceAnnotation struct {
++	// CPUShares contains resource annotation value cpushares key
++	CPUShares uint64 `json:"cpushares,omitempty"`
++	// CPULimit contains the cpu limit in millicores to be used by the container runtime to calculate
++	// quota
++	CPULimit int64 `json:"cpulimit,omitempty"`
++}
++
+ // managementCPUsOverride presents admission plugin that should replace pod container CPU requests with a new management resource.
+ // It applies to all pods that:
+ // 1. are in an allowed namespace
+@@ -217,6 +225,13 @@ func (a *managementCPUsOverride) Admit(ctx context.Context, attr admission.Attri
+ 		return err
+ 	}
+ 
++	if _, found := ns.Annotations[namespaceAllowedAnnotation]; !found && len(workloadType) > 0 {
++		pod.Annotations[workloadAdmissionWarning] = fmt.Sprintf(
++			"skipping pod CPUs requests modifications because the %s namespace is not annotated with %s to allow workload partitioning",
++			ns.GetName(), namespaceAllowedAnnotation)
++		return nil
++	}
++
+ 	if !doesNamespaceAllowWorkloadType(ns.Annotations, workloadType) {
+ 		return admission.NewForbidden(attr, fmt.Errorf("%s the pod namespace %q does not allow the workload type %s", PluginName, ns.Name, workloadType))
+ 	}
+@@ -245,13 +260,6 @@ func (a *managementCPUsOverride) Admit(ctx context.Context, attr admission.Attri
+ 		return nil
+ 	}
+ 
+-	// we should skip mutation of the pod that has container with both CPU limit and request because once we will remove
+-	// the request, the defaulter will set the request back with the CPU limit value
+-	if podHasBothCPULimitAndRequest(allContainers) {
+-		pod.Annotations[workloadAdmissionWarning] = "skip pod CPUs requests modifications because pod container has both CPU limit and request"
+-		return nil
+-	}
+-
+ 	// before we update the pod available under admission attributes, we need to verify that deletion of the CPU request
+ 	// will not change the pod QoS class, otherwise skip pod mutation
+ 	// 1. Copy the pod
+@@ -353,6 +361,14 @@ func updateContainersResources(containers []coreapi.Container, podAnnotations ma
+ 			continue
+ 		}
+ 
++		resourceAnno := resourceAnnotation{}
++
++		if c.Resources.Limits != nil {
++			if value, ok := c.Resources.Limits[coreapi.ResourceCPU]; ok {
++				resourceAnno.CPULimit = value.MilliValue()
++			}
++		}
++
+ 		if c.Resources.Requests != nil {
+ 			if _, ok := c.Resources.Requests[coreapi.ResourceCPU]; !ok {
+ 				continue
+@@ -361,9 +377,20 @@ func updateContainersResources(containers []coreapi.Container, podAnnotations ma
+ 			cpuRequest := c.Resources.Requests[coreapi.ResourceCPU]
+ 			cpuRequestInMilli := cpuRequest.MilliValue()
+ 
+-			cpuShares := cm.MilliCPUToShares(cpuRequestInMilli)
+-			podAnnotations[cpusharesAnnotationKey] = fmt.Sprintf(`{"%s": %d}`, containerResourcesAnnotationValueKeyCPUShares, cpuShares)
++			// Casting to uint64, Linux build returns uint64, noop Darwin build returns int64
++			resourceAnno.CPUShares = uint64(cm.MilliCPUToShares(cpuRequestInMilli))
++
++			// This should not error but if something does go wrong we default to string creation of just CPU Shares
++			// and add a warning annotation
++			resourceAnnoString, err := json.Marshal(resourceAnno)
++			if err != nil {
++				podAnnotations[workloadAdmissionWarning] = fmt.Sprintf("failed to marshal cpu resources, using fallback: err: %s", err.Error())
++				podAnnotations[cpusharesAnnotationKey] = fmt.Sprintf(`{"%s": %d}`, containerResourcesAnnotationValueKeyCPUShares, resourceAnno.CPUShares)
++			} else {
++				podAnnotations[cpusharesAnnotationKey] = string(resourceAnnoString)
++			}
+ 			delete(c.Resources.Requests, coreapi.ResourceCPU)
++			delete(c.Resources.Limits, coreapi.ResourceCPU)
+ 
+ 			if c.Resources.Limits == nil {
+ 				c.Resources.Limits = coreapi.ResourceList{}
+@@ -378,7 +405,7 @@ func updateContainersResources(containers []coreapi.Container, podAnnotations ma
+ 	}
+ }
+ 
+-func isGuaranteed(containers []coreapi.Container) bool {
++func IsGuaranteed(containers []coreapi.Container) bool {
+ 	for _, c := range containers {
+ 		// only memory and CPU resources are relevant to decide pod QoS class
+ 		for _, r := range []coreapi.ResourceName{coreapi.ResourceMemory, coreapi.ResourceCPU} {
+@@ -425,7 +452,7 @@ func isBestEffort(containers []coreapi.Container) bool {
+ }
+ 
+ func getPodQoSClass(containers []coreapi.Container) coreapi.PodQOSClass {
+-	if isGuaranteed(containers) {
++	if IsGuaranteed(containers) {
+ 		return coreapi.PodQOSGuaranteed
+ 	}
+ 
+@@ -449,10 +476,13 @@ func podHasBothCPULimitAndRequest(containers []coreapi.Container) bool {
+ 	return false
+ }
+ 
++// doesNamespaceAllowWorkloadType will return false when a workload type does not match any present ones.
+ func doesNamespaceAllowWorkloadType(annotations map[string]string, workloadType string) bool {
+ 	v, found := annotations[namespaceAllowedAnnotation]
++	// When a namespace contains no annotation for workloads we infer that to mean all workload types are allowed.
++	// The mutation hook will strip all workload annotation from pods that contain them in that circumstance.
+ 	if !found {
+-		return false
++		return true
+ 	}
+ 
+ 	for _, t := range strings.Split(v, ",") {
+@@ -559,17 +589,20 @@ func (a *managementCPUsOverride) Validate(ctx context.Context, attr admission.At
+ 		allErrs = append(allErrs, getPodInvalidWorkloadAnnotationError(pod.Annotations, err.Error()))
+ 	}
+ 
+-	workloadResourceAnnotations := map[string]map[string]int{}
++	workloadResourceAnnotations := resourceAnnotation{}
++	hasWorkloadAnnotation := false
+ 	for k, v := range pod.Annotations {
+ 		if !strings.HasPrefix(k, containerResourcesAnnotationPrefix) {
+ 			continue
+ 		}
++		hasWorkloadAnnotation = true
+ 
+-		resourceAnnotationValue := map[string]int{}
+-		if err := json.Unmarshal([]byte(v), &resourceAnnotationValue); err != nil {
++		// Custom decoder to print invalid fields for resources
++		decoder := json.NewDecoder(strings.NewReader(v))
++		decoder.DisallowUnknownFields()
++		if err := decoder.Decode(&workloadResourceAnnotations); err != nil {
+ 			allErrs = append(allErrs, getPodInvalidWorkloadAnnotationError(pod.Annotations, err.Error()))
+ 		}
+-		workloadResourceAnnotations[k] = resourceAnnotationValue
+ 	}
+ 
+ 	containersWorkloadResources := map[string]*coreapi.Container{}
+@@ -586,9 +619,9 @@ func (a *managementCPUsOverride) Validate(ctx context.Context, attr admission.At
+ 		}
+ 	}
+ 
+-	// the pod does not have workload annotation
+-	if len(workloadType) == 0 {
+-		if len(workloadResourceAnnotations) > 0 {
++	switch {
++	case len(workloadType) == 0: // the pod does not have workload annotation
++		if hasWorkloadAnnotation {
+ 			allErrs = append(allErrs, getPodInvalidWorkloadAnnotationError(pod.Annotations, "the pod without workload annotation can not have resource annotation"))
+ 		}
+ 
+@@ -599,21 +632,8 @@ func (a *managementCPUsOverride) Validate(ctx context.Context, attr admission.At
+ 
+ 			allErrs = append(allErrs, field.Invalid(field.NewPath("spec.containers.resources.requests"), c.Resources.Requests, fmt.Sprintf("the pod without workload annotations can not have containers with workload resources %q", resourceName)))
+ 		}
+-	} else {
+-		if !doesNamespaceAllowWorkloadType(ns.Annotations, workloadType) { // pod has workload annotation, but the pod does not have workload annotation
+-			allErrs = append(allErrs, getPodInvalidWorkloadAnnotationError(pod.Annotations, fmt.Sprintf("the pod can not have workload annotation, when the namespace %q does not allow it", ns.Name)))
+-		}
+-
+-		for _, v := range workloadResourceAnnotations {
+-			if len(v) > 1 {
+-				allErrs = append(allErrs, field.Invalid(field.NewPath("metadata.annotations"), pod.Annotations, "the pod resource annotation value can not have more than one key"))
+-			}
+-
+-			// the pod should not have any resource annotations with the value that includes keys different from cpushares
+-			if _, ok := v[containerResourcesAnnotationValueKeyCPUShares]; len(v) == 1 && !ok {
+-				allErrs = append(allErrs, field.Invalid(field.NewPath("metadata.annotations"), pod.Annotations, "the pod resource annotation value should have only cpushares key"))
+-			}
+-		}
++	case !doesNamespaceAllowWorkloadType(ns.Annotations, workloadType): // pod has workload annotation, but the namespace does not allow specified workload
++		allErrs = append(allErrs, getPodInvalidWorkloadAnnotationError(pod.Annotations, fmt.Sprintf("the namespace %q does not allow the workload type %s", ns.Name, workloadType)))
+ 	}
+ 
+ 	if len(allErrs) == 0 {
+diff --git a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
+index 114a5ad3865..9564bffe395 100644
+--- a/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
++++ b/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride/admission_test.go
+@@ -84,12 +84,12 @@ func TestAdmit(t *testing.T) {
+ 	}{
+ 		{
+ 			name:               "should return admission error when the pod namespace does not allow the workload type",
+-			pod:                testManagedPod("500m", "250m", "500Mi", "250Mi"),
++			pod:                testManagedPodWithWorkloadAnnotation("500m", "250m", "500Mi", "250Mi", "non-existent"),
+ 			expectedCpuRequest: resource.MustParse("250m"),
+-			namespace:          testNamespace(),
++			namespace:          testManagedNamespace(),
+ 			nodes:              []*corev1.Node{testNodeWithManagementResource()},
+ 			infra:              testClusterSNOInfra(),
+-			expectedError:      fmt.Errorf("the pod namespace %q does not allow the workload type management", "namespace"),
++			expectedError:      fmt.Errorf("the pod namespace %q does not allow the workload type non-existent", "managed-namespace"),
+ 		},
+ 		{
+ 			name:               "should ignore pods that do not have managed annotation",
+@@ -167,14 +167,33 @@ func TestAdmit(t *testing.T) {
+ 			expectedError:      fmt.Errorf(`failed to get workload annotation effect: the workload annotation value map["test":"test"] does not have "effect" key`),
+ 			infra:              testClusterSNOInfra(),
+ 		},
++		{
++			name: "should return admission warning when the pod has workload annotation but the namespace does not",
++			pod: testManagedPodWithAnnotations(
++				"500m",
++				"250m",
++				"500Mi",
++				"250Mi",
++				map[string]string{
++					fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement): `{"test": "test"}`,
++				},
++			),
++			expectedCpuRequest: resource.MustParse("250m"),
++			expectedAnnotations: map[string]string{
++				workloadAdmissionWarning: "skipping pod CPUs requests modifications because the namespace namespace is not annotated with workload.openshift.io/allowed to allow workload partitioning",
++			},
++			namespace: testNamespace(),
++			nodes:     []*corev1.Node{testNodeWithManagementResource()},
++			infra:     testClusterSNOInfra(),
++		},
+ 		{
+ 			name:               "should delete CPU requests and update workload CPU annotations for the burstable pod with managed annotation",
+ 			pod:                testManagedPod("", "250m", "500Mi", "250Mi"),
+ 			expectedCpuRequest: resource.Quantity{},
+ 			namespace:          testManagedNamespace(),
+ 			expectedAnnotations: map[string]string{
+-				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "test"):                fmt.Sprintf(`{"%s": 256}`, containerResourcesAnnotationValueKeyCPUShares),
+-				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "initTest"):            fmt.Sprintf(`{"%s": 256}`, containerResourcesAnnotationValueKeyCPUShares),
++				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "test"):                fmt.Sprintf(`{"%s":256}`, containerResourcesAnnotationValueKeyCPUShares),
++				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "initTest"):            fmt.Sprintf(`{"%s":256}`, containerResourcesAnnotationValueKeyCPUShares),
+ 				fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement): fmt.Sprintf(`{"%s":"%s"}`, podWorkloadAnnotationEffect, workloadEffectPreferredDuringScheduling),
+ 			},
+ 			nodes: []*corev1.Node{testNodeWithManagementResource()},
+@@ -217,12 +236,14 @@ func TestAdmit(t *testing.T) {
+ 			infra: testClusterSNOInfra(),
+ 		},
+ 		{
+-			name:               "should ignore pod when one of pod containers have both CPU limit and request",
++			name:               "should not ignore pod when one of pod containers have both CPU limit and request",
+ 			pod:                testManagedPod("500m", "250m", "500Mi", ""),
+-			expectedCpuRequest: resource.MustParse("250m"),
++			expectedCpuRequest: resource.Quantity{},
+ 			namespace:          testManagedNamespace(),
+ 			expectedAnnotations: map[string]string{
+-				workloadAdmissionWarning: fmt.Sprintf("skip pod CPUs requests modifications because pod container has both CPU limit and request"),
++				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "test"):                fmt.Sprintf(`{"%s":256,"cpulimit":500}`, containerResourcesAnnotationValueKeyCPUShares),
++				fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, "initTest"):            fmt.Sprintf(`{"%s":256,"cpulimit":500}`, containerResourcesAnnotationValueKeyCPUShares),
++				fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement): fmt.Sprintf(`{"%s":"%s"}`, podWorkloadAnnotationEffect, workloadEffectPreferredDuringScheduling),
+ 			},
+ 			nodes: []*corev1.Node{testNodeWithManagementResource()},
+ 			infra: testClusterSNOInfra(),
+@@ -239,12 +260,12 @@ func TestAdmit(t *testing.T) {
+ 			infra: testClusterSNOInfra(),
+ 		},
+ 		{
+-			name:               "should not mutate the pod when at least one node does not have management resources",
++			name:               "should not mutate the pod when cpu partitioning is not set to AllNodes",
+ 			pod:                testManagedPod("500m", "250m", "500Mi", "250Mi"),
+ 			expectedCpuRequest: resource.MustParse("250m"),
+ 			namespace:          testManagedNamespace(),
+ 			nodes:              []*corev1.Node{testNode()},
+-			infra:              testClusterSNOInfra(),
++			infra:              testClusterInfraWithoutWorkloadPartitioning(),
+ 		},
+ 		{
+ 			name:               "should return admission error when the cluster does not have any nodes",
+@@ -407,7 +428,7 @@ func TestValidate(t *testing.T) {
+ 			),
+ 			namespace:     testManagedNamespace(),
+ 			nodes:         []*corev1.Node{testNodeWithManagementResource()},
+-			expectedError: fmt.Errorf("he pod resource annotation value should have only cpushares key"),
++			expectedError: fmt.Errorf("json: unknown field \"cpuset\""),
+ 		},
+ 		{
+ 			name: "should return invalid error when the pod does not have workload annotation, but has resource annotation",
+@@ -437,16 +458,28 @@ func TestValidate(t *testing.T) {
+ 			expectedError: fmt.Errorf("the pod without workload annotations can not have containers with workload resources %q", "management.workload.openshift.io/cores"),
+ 		},
+ 		{
+-			name: "should return invalid error when the pod has workload annotation, but the pod namespace does not have allowed annotation",
+-			pod: testManagedPod(
++			name: "should return invalid error when the pod has workload annotation, but the pod namespace does not have allowed workload type",
++			pod: testManagedPodWithWorkloadAnnotation(
+ 				"500m",
+ 				"250m",
+ 				"500Mi",
+ 				"250Mi",
++				"non-existent",
+ 			),
+-			namespace:     testNamespace(),
++			namespace:     testManagedNamespace(),
+ 			nodes:         []*corev1.Node{testNodeWithManagementResource()},
+-			expectedError: fmt.Errorf("the pod can not have workload annotation, when the namespace %q does not allow it", "namespace"),
++			expectedError: fmt.Errorf("the namespace %q does not allow the workload type %s", "managed-namespace", "non-existent"),
++		},
++		{
++			name: "should not return any errors when the pod has workload annotation, but the pod namespace has no annotations",
++			pod: testManagedPod(
++				"500m",
++				"250m",
++				"500Mi",
++				"250Mi",
++			),
++			namespace: testNamespace(),
++			nodes:     []*corev1.Node{testNodeWithManagementResource()},
+ 		},
+ 		{
+ 			name: "should not return any errors when the pod and namespace valid",
+@@ -532,19 +565,12 @@ func testManagedStaticPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest strin
+ }
+ 
+ func testManagedPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest string) *kapi.Pod {
+-	pod := testPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest)
+-
+-	pod.Annotations = map[string]string{}
+-	for _, c := range pod.Spec.InitContainers {
+-		cpusetAnnotation := fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, c.Name)
+-		pod.Annotations[cpusetAnnotation] = `{"cpuset": "0-1"}`
+-	}
+-	for _, c := range pod.Spec.Containers {
+-		cpusetAnnotation := fmt.Sprintf("%s%s", containerResourcesAnnotationPrefix, c.Name)
+-		pod.Annotations[cpusetAnnotation] = `{"cpuset": "0-1"}`
+-	}
++	return testManagedPodWithWorkloadAnnotation(cpuLimit, cpuRequest, memoryLimit, memoryRequest, workloadTypeManagement)
++}
+ 
+-	managementWorkloadAnnotation := fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadTypeManagement)
++func testManagedPodWithWorkloadAnnotation(cpuLimit, cpuRequest, memoryLimit, memoryRequest string, workloadType string) *kapi.Pod {
++	pod := testPod(cpuLimit, cpuRequest, memoryLimit, memoryRequest)
++	managementWorkloadAnnotation := fmt.Sprintf("%s%s", podWorkloadTargetAnnotationPrefix, workloadType)
+ 	pod.Annotations = map[string]string{
+ 		managementWorkloadAnnotation: fmt.Sprintf(`{"%s":"%s"}`, podWorkloadAnnotationEffect, workloadEffectPreferredDuringScheduling),
+ 	}
+@@ -675,9 +701,8 @@ func testClusterSNOInfra() *configv1.Infrastructure {
+ 	}
+ }
+ 
+-func testClusterInfraWithoutTopologyFields() *configv1.Infrastructure {
++func testClusterInfraWithoutWorkloadPartitioning() *configv1.Infrastructure {
+ 	infra := testClusterSNOInfra()
+-	infra.Status.ControlPlaneTopology = ""
+-	infra.Status.InfrastructureTopology = ""
++	infra.Status.CPUPartitioning = configv1.CPUPartitioningNone
+ 	return infra
+ }
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+new file mode 100644
+index 00000000000..61a7aa614ad
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission.go
+@@ -0,0 +1,152 @@
++package mixedcpus
++
++import (
++	"context"
++	"fmt"
++	"io"
++	v1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/api/errors"
++	"k8s.io/apimachinery/pkg/api/resource"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/admission/initializer"
++	"k8s.io/client-go/informers"
++	"k8s.io/client-go/kubernetes"
++	corev1listers "k8s.io/client-go/listers/core/v1"
++	"k8s.io/kubernetes/openshift-kube-apiserver/admission/autoscaling/managementcpusoverride"
++	coreapi "k8s.io/kubernetes/pkg/apis/core"
++)
++
++const (
++	PluginName       = "autoscaling.openshift.io/MixedCPUs"
++	annotationEnable = "enable"
++	// containerResourceRequestName is the name of the resource that should be specified under the container's request in the pod spec
++	containerResourceRequestName = "workload.openshift.io/enable-shared-cpus"
++	// runtimeAnnotationPrefix is the prefix for the annotation that is expected by the runtime
++	runtimeAnnotationPrefix = "cpu-shared.crio.io"
++	// namespaceAllowedAnnotation contains the namespace allowed annotation key
++	namespaceAllowedAnnotation = "workload.mixedcpus.openshift.io/allowed"
++)
++
++var _ = initializer.WantsExternalKubeClientSet(&mixedCPUsMutation{})
++var _ = initializer.WantsExternalKubeInformerFactory(&mixedCPUsMutation{})
++var _ = admission.MutationInterface(&mixedCPUsMutation{})
++
++type mixedCPUsMutation struct {
++	*admission.Handler
++	client          kubernetes.Interface
++	podLister       corev1listers.PodLister
++	podListerSynced func() bool
++	nsLister        corev1listers.NamespaceLister
++	nsListerSynced  func() bool
++}
++
++func Register(plugins *admission.Plugins) {
++	plugins.Register(PluginName,
++		func(config io.Reader) (admission.Interface, error) {
++			return &mixedCPUsMutation{
++				Handler: admission.NewHandler(admission.Create),
++			}, nil
++		})
++}
++
++// SetExternalKubeClientSet implements the WantsExternalKubeClientSet interface.
++func (s *mixedCPUsMutation) SetExternalKubeClientSet(client kubernetes.Interface) {
++	s.client = client
++}
++
++func (s *mixedCPUsMutation) SetExternalKubeInformerFactory(kubeInformers informers.SharedInformerFactory) {
++	s.podLister = kubeInformers.Core().V1().Pods().Lister()
++	s.podListerSynced = kubeInformers.Core().V1().Pods().Informer().HasSynced
++	s.nsLister = kubeInformers.Core().V1().Namespaces().Lister()
++	s.nsListerSynced = kubeInformers.Core().V1().Namespaces().Informer().HasSynced
++}
++
++func (s *mixedCPUsMutation) ValidateInitialization() error {
++	if s.client == nil {
++		return fmt.Errorf("%s plugin needs a kubernetes client", PluginName)
++	}
++	if s.podLister == nil {
++		return fmt.Errorf("%s did not get a pod lister", PluginName)
++	}
++	if s.podListerSynced == nil {
++		return fmt.Errorf("%s plugin needs a pod lister synced", PluginName)
++	}
++	if s.nsLister == nil {
++		return fmt.Errorf("%s did not get a namespace lister", PluginName)
++	}
++	if s.nsListerSynced == nil {
++		return fmt.Errorf("%s plugin needs a namespace lister synced", PluginName)
++	}
++	return nil
++}
++
++func (s *mixedCPUsMutation) Admit(ctx context.Context, attr admission.Attributes, o admission.ObjectInterfaces) error {
++	if attr.GetResource().GroupResource() != coreapi.Resource("pods") || attr.GetSubresource() != "" {
++		return nil
++	}
++
++	pod, ok := attr.GetObject().(*coreapi.Pod)
++	if !ok {
++		return admission.NewForbidden(attr, fmt.Errorf("%s unexpected object: %#v", attr.GetObject(), PluginName))
++	}
++
++	for i := 0; i < len(pod.Spec.Containers); i++ {
++		cnt := &pod.Spec.Containers[i]
++		requested, v := isContainerRequestForSharedCPUs(cnt)
++		if !requested {
++			continue
++		}
++		ns, err := s.getPodNs(ctx, pod.Namespace)
++		if err != nil {
++			return fmt.Errorf("%s %w", PluginName, err)
++		}
++		_, found := ns.Annotations[namespaceAllowedAnnotation]
++		if !found {
++			return admission.NewForbidden(attr, fmt.Errorf("%s pod %s namespace %s is not allowed for %s resource request", PluginName, pod.Name, pod.Namespace, containerResourceRequestName))
++		}
++		if !managementcpusoverride.IsGuaranteed(pod.Spec.Containers) {
++			return admission.NewForbidden(attr, fmt.Errorf("%s %s/%s requests for %q resource but pod is not Guaranteed QoS class", PluginName, pod.Name, cnt.Name, containerResourceRequestName))
++		}
++		if v.Value() > 1 {
++			return admission.NewForbidden(attr, fmt.Errorf("%s %s/%s more than a single %q resource is forbiden, please set the request to 1 or remove it", PluginName, pod.Name, cnt.Name, containerResourceRequestName))
++		}
++		addRuntimeAnnotation(pod, cnt.Name)
++	}
++	return nil
++}
++
++func (s *mixedCPUsMutation) getPodNs(ctx context.Context, nsName string) (*v1.Namespace, error) {
++	ns, err := s.nsLister.Get(nsName)
++	if err != nil {
++		if !errors.IsNotFound(err) {
++			return nil, fmt.Errorf("%s failed to retrieve namespace %q from lister; %w", PluginName, nsName, err)
++		}
++		// cache didn't update fast enough
++		ns, err = s.client.CoreV1().Namespaces().Get(ctx, nsName, metav1.GetOptions{})
++		if err != nil {
++			return nil, fmt.Errorf("%s failed to retrieve namespace %q from api server; %w", PluginName, nsName, err)
++		}
++	}
++	return ns, nil
++}
++
++func isContainerRequestForSharedCPUs(container *coreapi.Container) (bool, resource.Quantity) {
++	for rName, quan := range container.Resources.Requests {
++		if rName == containerResourceRequestName {
++			return true, quan
++		}
++	}
++	return false, resource.Quantity{}
++}
++
++func addRuntimeAnnotation(pod *coreapi.Pod, cntName string) {
++	if pod.Annotations == nil {
++		pod.Annotations = map[string]string{}
++	}
++	pod.Annotations[getRuntimeAnnotationName(cntName)] = annotationEnable
++}
++
++func getRuntimeAnnotationName(cntName string) string {
++	return fmt.Sprintf("%s/%s", runtimeAnnotationPrefix, cntName)
++}
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+new file mode 100644
+index 00000000000..89d6dab6710
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/admission_test.go
+@@ -0,0 +1,243 @@
++package mixedcpus
++
++import (
++	"context"
++	"testing"
++
++	corev1 "k8s.io/api/core/v1"
++	"k8s.io/apimachinery/pkg/api/errors"
++	"k8s.io/apimachinery/pkg/api/resource"
++	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/runtime/schema"
++	"k8s.io/apiserver/pkg/admission"
++	"k8s.io/apiserver/pkg/authentication/user"
++	"k8s.io/client-go/kubernetes/fake"
++	corev1listers "k8s.io/client-go/listers/core/v1"
++	"k8s.io/client-go/tools/cache"
++	coreapi "k8s.io/kubernetes/pkg/apis/core"
++	"k8s.io/kubernetes/test/e2e/framework/pod"
++)
++
++func TestAdmit(t *testing.T) {
++	testCases := []struct {
++		name              string
++		pod               *coreapi.Pod
++		ns                *corev1.Namespace
++		expectedPodStatus *errors.StatusError
++		// container names that should have the runtime annotation
++		expectedContainersWithAnnotations []string
++	}{
++		{
++			name: "one container, requests single resources",
++			pod: makePod("test1", withNs("foo"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				)),
++			ns:                                makeNs("foo", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{"cnt1"},
++			expectedPodStatus:                 nil,
++		},
++		{
++			name: "two containers, only one of them requests single resource",
++			pod: makePod("test1", withNs("foo"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:    resource.MustParse("1"),
++						coreapi.ResourceMemory: resource.MustParse("100Mi"),
++					},
++				),
++				withGuaranteedContainer("cnt2",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				)),
++			ns:                                makeNs("foo", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{"cnt2"},
++			expectedPodStatus:                 nil,
++		},
++		{
++			name: "two containers, one of them requests more than single resource",
++			pod: makePod("test1", withNs("bar"),
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++				withGuaranteedContainer("cnt2",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("2"),
++					},
++				)),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++		{
++			name: "one container, pod is not Guaranteed QoS class",
++			pod: makePod("test1", withNs("bar"),
++				withContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++			),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++		{
++			name: "one container, pod is not in allowed namespace",
++			pod: makePod("test1",
++				withGuaranteedContainer("cnt1",
++					map[coreapi.ResourceName]resource.Quantity{
++						coreapi.ResourceCPU:          resource.MustParse("1"),
++						coreapi.ResourceMemory:       resource.MustParse("100Mi"),
++						containerResourceRequestName: resource.MustParse("1"),
++					},
++				),
++			),
++			ns:                                makeNs("bar", map[string]string{namespaceAllowedAnnotation: ""}),
++			expectedContainersWithAnnotations: []string{},
++			expectedPodStatus:                 errors.NewForbidden(schema.GroupResource{}, "", nil),
++		},
++	}
++
++	for _, tc := range testCases {
++		t.Run(tc.name, func(t *testing.T) {
++			testPod := tc.pod
++			mutation, err := getMockMixedCPUsMutation(testPod, tc.ns)
++			if err != nil {
++				t.Fatalf("%v", err)
++			}
++			attrs := admission.NewAttributesRecord(testPod,
++				nil,
++				schema.GroupVersionKind{},
++				testPod.Namespace,
++				testPod.Name,
++				coreapi.Resource("pods").WithVersion("version"),
++				"",
++				admission.Create,
++				nil,
++				false,
++				fakeUser())
++
++			err = mutation.Admit(context.TODO(), attrs, nil)
++			if err != nil && tc.expectedPodStatus == nil {
++				t.Errorf("%s: unexpected error %v", tc.name, err)
++			}
++
++			if err != nil {
++				if !errors.IsForbidden(tc.expectedPodStatus) {
++					t.Errorf("%s: forbidden error was expected. got %v instead", tc.name, err)
++				}
++			}
++
++			testPod, _ = attrs.GetObject().(*coreapi.Pod)
++			for _, cntName := range tc.expectedContainersWithAnnotations {
++				if v, ok := testPod.Annotations[getRuntimeAnnotationName(cntName)]; !ok || v != annotationEnable {
++					t.Errorf("%s: container %s is missing runtime annotation", tc.name, cntName)
++				}
++			}
++		})
++	}
++}
++
++func fakeUser() user.Info {
++	return &user.DefaultInfo{
++		Name: "testuser",
++	}
++}
++
++func makeNs(name string, annotations map[string]string) *corev1.Namespace {
++	return &corev1.Namespace{
++		ObjectMeta: metav1.ObjectMeta{
++			Name:        name,
++			Annotations: annotations,
++		},
++	}
++}
++
++func makePod(name string, opts ...func(pod *coreapi.Pod)) *coreapi.Pod {
++	p := &coreapi.Pod{
++		ObjectMeta: metav1.ObjectMeta{
++			Name: name,
++		},
++	}
++	for _, opt := range opts {
++		opt(p)
++	}
++	return p
++}
++
++func withContainer(name string, requests coreapi.ResourceList) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		cnt := coreapi.Container{
++			Name:  name,
++			Image: pod.GetDefaultTestImage(),
++			Resources: coreapi.ResourceRequirements{
++				Requests: requests,
++			},
++		}
++		p.Spec.Containers = append(p.Spec.Containers, cnt)
++	}
++}
++
++func withGuaranteedContainer(name string, requests coreapi.ResourceList) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		withContainer(name, requests)(p)
++		for i := 0; i < len(p.Spec.Containers); i++ {
++			cnt := &p.Spec.Containers[i]
++			if cnt.Name == name {
++				cnt.Resources.Limits = cnt.Resources.Requests
++			}
++		}
++	}
++}
++
++func withNs(name string) func(p *coreapi.Pod) {
++	return func(p *coreapi.Pod) {
++		p.Namespace = name
++	}
++}
++
++func fakePodLister(pod *coreapi.Pod) corev1listers.PodLister {
++	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
++	if pod != nil {
++		_ = indexer.Add(pod)
++	}
++	return corev1listers.NewPodLister(indexer)
++}
++
++func fakeNsLister(ns *corev1.Namespace) corev1listers.NamespaceLister {
++	indexer := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
++	_ = indexer.Add(ns)
++	return corev1listers.NewNamespaceLister(indexer)
++}
++
++func getMockMixedCPUsMutation(pod *coreapi.Pod, ns *corev1.Namespace) (*mixedCPUsMutation, error) {
++	m := &mixedCPUsMutation{
++		Handler:         admission.NewHandler(admission.Create),
++		client:          &fake.Clientset{},
++		podListerSynced: func() bool { return true },
++		podLister:       fakePodLister(pod),
++		nsListerSynced:  func() bool { return true },
++		nsLister:        fakeNsLister(ns),
++	}
++	if err := m.ValidateInitialization(); err != nil {
++		return nil, err
++	}
++
++	return m, nil
++}
+diff --git a/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+new file mode 100644
+index 00000000000..bac1a688e1e
+--- /dev/null
++++ b/openshift-kube-apiserver/admission/autoscaling/mixedcpus/doc.go
+@@ -0,0 +1,10 @@
++package mixedcpus
++
++//The admission should provide the following functionalities:
++//1. In case a user specifies more than a single `openshift.io/enable-shared-cpus` resource,
++//it rejects the pod request with an error explaining the user how to fix its pod spec.
++//2. It rejects a non-guaranteed pod which is asking for `openshift.io/enable-shared-cpus` resource.
++//3. It adds an annotation `cpu-shared.crio.io` that will be used to tell the runtime that shared cpus were requested.
++//For every container requested for shared cpus, it adds an annotation with the following scheme:
++//`cpu-shared.crio.io/<container name>`
++//4. It validates that the pod deployed in a namespace that has `workload.mixedcpus.openshift.io/allowed` annotation.
+diff --git a/pkg/kubelet/managed/managed.go b/pkg/kubelet/managed/managed.go
+index 3d9ff87aa62..4063d5381d6 100644
+--- a/pkg/kubelet/managed/managed.go
++++ b/pkg/kubelet/managed/managed.go
+@@ -41,6 +41,7 @@ const (
+ 
+ type WorkloadContainerAnnotation struct {
+ 	CpuShares uint64 `json:"cpushares"`
++	CpuLimit  int64  `json:"cpulimit,omitempty"`
+ }
+ 
+ func NewWorkloadContainerAnnotation(cpushares uint64) WorkloadContainerAnnotation {
+@@ -131,6 +132,10 @@ func updateContainers(workloadName string, pod *v1.Pod) error {
+ 		cpuRequestInMilli := cpuRequest.MilliValue()
+ 
+ 		containerAnnotation := NewWorkloadContainerAnnotation(MilliCPUToShares(cpuRequestInMilli))
++		if value, ok := container.Resources.Limits[v1.ResourceCPU]; ok {
++			containerAnnotation.CpuLimit = value.MilliValue()
++		}
++
+ 		jsonAnnotation, _ := containerAnnotation.Serialize()
+ 		containerNameKey := fmt.Sprintf("%v%v", ContainerAnnotationPrefix, container.Name)
+ 
+@@ -141,6 +146,7 @@ func updateContainers(workloadName string, pod *v1.Pod) error {
+ 		container.Resources.Limits[GenerateResourceName(workloadName)] = *newCPURequest
+ 
+ 		delete(container.Resources.Requests, v1.ResourceCPU)
++		delete(container.Resources.Limits, v1.ResourceCPU)
+ 		return nil
+ 	}
+ 	for idx := range pod.Spec.Containers {
+diff --git a/pkg/kubelet/managed/managed_test.go b/pkg/kubelet/managed/managed_test.go
+index 16acda0868c..e4973f8a01d 100644
+--- a/pkg/kubelet/managed/managed_test.go
++++ b/pkg/kubelet/managed/managed_test.go
+@@ -267,7 +267,7 @@ func TestStaticPodManaged(t *testing.T) {
+ 			},
+ 			expectedAnnotations: map[string]string{
+ 				"target.workload.openshift.io/management": `{"effect": "PreferredDuringScheduling"}`,
+-				"resources.workload.openshift.io/c1":      `{"cpushares":20}`,
++				"resources.workload.openshift.io/c1":      `{"cpushares":20,"cpulimit":100}`,
+ 			},
+ 		},
+ 		{
+@@ -393,6 +393,74 @@ func TestStaticPodManaged(t *testing.T) {
+ 			},
+ 			isGuaranteed: true,
+ 		},
++		{
++			pod: &v1.Pod{
++				TypeMeta: metav1.TypeMeta{
++					Kind:       "Pod",
++					APIVersion: "",
++				},
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test",
++					UID:       "12345",
++					Namespace: "mynamespace",
++					Annotations: map[string]string{
++						"target.workload.openshift.io/management": `{"effect": "PreferredDuringScheduling"}`,
++					},
++				},
++				Spec: v1.PodSpec{
++					Containers: []v1.Container{
++						{
++							Name:  "c1",
++							Image: "test/nginx",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("100m"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++								Limits: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("200m"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++							},
++						},
++						{
++							Name:  "c2",
++							Image: "test/image",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("1"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++							},
++						},
++						{
++							Name:  "c_3",
++							Image: "test/image",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("1"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++								Limits: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("1"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++							},
++						},
++					},
++					SecurityContext: &v1.PodSecurityContext{},
++				},
++				Status: v1.PodStatus{
++					Phase: v1.PodPending,
++				},
++			},
++			expectedAnnotations: map[string]string{
++				"target.workload.openshift.io/management": `{"effect": "PreferredDuringScheduling"}`,
++				"resources.workload.openshift.io/c1":      `{"cpushares":102,"cpulimit":200}`,
++				"resources.workload.openshift.io/c2":      `{"cpushares":1024}`,
++				"resources.workload.openshift.io/c_3":     `{"cpushares":1024,"cpulimit":1000}`,
++			},
++		},
+ 	}
+ 
+ 	for _, tc := range testCases {
+@@ -610,6 +678,74 @@ func TestStaticPodThrottle(t *testing.T) {
+ 			},
+ 			isGuaranteed: true,
+ 		},
++		{
++			pod: &v1.Pod{
++				TypeMeta: metav1.TypeMeta{
++					Kind:       "Pod",
++					APIVersion: "",
++				},
++				ObjectMeta: metav1.ObjectMeta{
++					Name:      "test",
++					UID:       "12345",
++					Namespace: "mynamespace",
++					Annotations: map[string]string{
++						"target.workload.openshift.io/throttle": `{"effect": "PreferredDuringScheduling"}`,
++					},
++				},
++				Spec: v1.PodSpec{
++					Containers: []v1.Container{
++						{
++							Name:  "c1",
++							Image: "test/image",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("100m"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++								Limits: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("200m"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("200m"),
++								},
++							},
++						},
++						{
++							Name:  "c2",
++							Image: "test/image",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("1"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++								Limits: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("2"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("200m"),
++								},
++							},
++						},
++						{
++							Name:  "c_3",
++							Image: "test/image",
++							Resources: v1.ResourceRequirements{
++								Requests: v1.ResourceList{
++									v1.ResourceName(v1.ResourceCPU):    resource.MustParse("1"),
++									v1.ResourceName(v1.ResourceMemory): resource.MustParse("100m"),
++								},
++							},
++						},
++					},
++					SecurityContext: &v1.PodSecurityContext{},
++				},
++				Status: v1.PodStatus{
++					Phase: v1.PodPending,
++				},
++			},
++			expectedAnnotations: map[string]string{
++				"target.workload.openshift.io/throttle": `{"effect": "PreferredDuringScheduling"}`,
++				"resources.workload.openshift.io/c1":    `{"cpushares":102,"cpulimit":200}`,
++				"resources.workload.openshift.io/c2":    `{"cpushares":1024,"cpulimit":2000}`,
++				"resources.workload.openshift.io/c_3":   `{"cpushares":1024}`,
++			},
++		},
+ 	}
+ 
+ 	for _, tc := range testCases {
+-- 
+2.47.0
+

@@ -1,0 +1,87 @@
+From 9be67579ffad11b9c307b5d3ee1395f56e720da7 Mon Sep 17 00:00:00 2001
+From: David Eads <deads@redhat.com>
+Date: Fri, 9 Jul 2021 16:51:01 -0400
+Subject: [PATCH] UPSTREAM: <carry>: add a way to inject a vulnerable, legacy
+ service-ca.crt for migration compatibility
+
+OpenShift-Rebase-Source: bf2b5fa3985
+---
+ .../servicecacertpublisher/publisher.go       | 47 +++++++++++++++++--
+ 1 file changed, 42 insertions(+), 5 deletions(-)
+
+diff --git a/openshift-kube-controller-manager/servicecacertpublisher/publisher.go b/openshift-kube-controller-manager/servicecacertpublisher/publisher.go
+index 823724eae09..af17ee98026 100644
+--- a/openshift-kube-controller-manager/servicecacertpublisher/publisher.go
++++ b/openshift-kube-controller-manager/servicecacertpublisher/publisher.go
+@@ -3,7 +3,10 @@ package servicecacertpublisher
+ import (
+ 	"context"
+ 	"fmt"
++	"os"
+ 	"reflect"
++	"strconv"
++	"sync"
+ 	"time"
+ 
+ 	v1 "k8s.io/api/core/v1"
+@@ -149,6 +152,44 @@ func (c *Publisher) processNextWorkItem() bool {
+ 	return true
+ }
+ 
++var (
++	// default secure
++	// This annotation prompts the service ca operator to inject
++	// the service ca bundle into the configmap.
++	injectionAnnotation = map[string]string{
++		"service.beta.openshift.io/inject-cabundle": "true",
++	}
++	setAnnotationOnce = sync.Once{}
++)
++
++func getInjectionAnnotation() map[string]string {
++	setAnnotationOnce.Do(func() {
++		// this envvar can be used to get the kube-controller-manager to inject a vulnerable legacy service ca
++		// the kube-controller-manager carries no existing patches to launch, so we aren't going add new
++		// perma-flags.
++		// it would be nicer to find a way to pass this more obviously.  This is a deep side-effect.
++		// though ideally, we see this age out over time.
++		useVulnerable := os.Getenv("OPENSHIFT_USE_VULNERABLE_LEGACY_SERVICE_CA_CRT")
++		if len(useVulnerable) == 0 {
++			return
++		}
++		useVulnerableBool, err := strconv.ParseBool(useVulnerable)
++		if err != nil {
++			// caller went crazy, don't use this unless you're careful
++			panic(err)
++		}
++		if useVulnerableBool {
++			// This annotation prompts the service ca operator to inject
++			// the vulnerable, legacy service ca bundle into the configmap.
++			injectionAnnotation = map[string]string{
++				"service.alpha.openshift.io/inject-vulnerable-legacy-cabundle": "true",
++			}
++		}
++	})
++
++	return injectionAnnotation
++}
++
+ func (c *Publisher) syncNamespace(ns string) (err error) {
+ 	startTime := time.Now()
+ 	defer func() {
+@@ -156,11 +197,7 @@ func (c *Publisher) syncNamespace(ns string) (err error) {
+ 		klog.V(4).Infof("Finished syncing namespace %q (%v)", ns, time.Since(startTime))
+ 	}()
+ 
+-	annotations := map[string]string{
+-		// This annotation prompts the service ca operator to inject
+-		// the service ca bundle into the configmap.
+-		"service.beta.openshift.io/inject-cabundle": "true",
+-	}
++	annotations := getInjectionAnnotation()
+ 
+ 	cm, err := c.cmLister.ConfigMaps(ns).Get(ServiceCACertConfigMapName)
+ 	switch {
+-- 
+2.47.0
+

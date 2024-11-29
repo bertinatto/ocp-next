@@ -1,4 +1,4 @@
-From 31b11fa6acf31298a35730ad0e8b1a09852bf4ce Mon Sep 17 00:00:00 2001
+From a8959ebde9148d92ed372cbdb93d34ad49b6235a Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:59 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Remove excessive e2e logging
@@ -39,7 +39,7 @@ index a0a2059b6bb..4cac4ed3a00 100644
  <klog> framework.go:xxx] Skipping waiting for service account
  < Exit [BeforeEach] e2e - set up framework | framework.go:xxx <time>
 diff --git a/test/e2e/framework/network/utils.go b/test/e2e/framework/network/utils.go
-index 2e8fb196c84..5627856ac32 100644
+index a2febeab5f8..bdc9f44ee0e 100644
 --- a/test/e2e/framework/network/utils.go
 +++ b/test/e2e/framework/network/utils.go
 @@ -1027,8 +1027,6 @@ func PokeHTTP(host string, port int, path string, params *HTTPPokeParams) HTTPPo
@@ -62,10 +62,10 @@ index 2e8fb196c84..5627856ac32 100644
  }
  
 diff --git a/test/e2e/framework/util.go b/test/e2e/framework/util.go
-index a3eb8a39ac9..b79c507c803 100644
+index a6dc9b125d3..eb2f6386493 100644
 --- a/test/e2e/framework/util.go
 +++ b/test/e2e/framework/util.go
-@@ -496,7 +496,7 @@ func countEndpointsSlicesNum(epList *discoveryv1.EndpointSliceList, addressType
+@@ -499,7 +499,7 @@ func countEndpointsSlicesNum(epList *discoveryv1.EndpointSliceList, addressType
  
  // restclientConfig returns a config holds the information needed to build connection to kubernetes clusters.
  func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
@@ -74,7 +74,7 @@ index a3eb8a39ac9..b79c507c803 100644
  	if TestContext.KubeConfig == "" {
  		return nil, fmt.Errorf("KubeConfig must be specified to load client config")
  	}
-@@ -505,7 +505,7 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
+@@ -508,7 +508,7 @@ func restclientConfig(kubeContext string) (*clientcmdapi.Config, error) {
  		return nil, fmt.Errorf("error loading KubeConfig: %v", err.Error())
  	}
  	if kubeContext != "" {
@@ -84,5 +84,5 @@ index a3eb8a39ac9..b79c507c803 100644
  	}
  	return c, nil
 -- 
-2.46.0
+2.47.0
 
