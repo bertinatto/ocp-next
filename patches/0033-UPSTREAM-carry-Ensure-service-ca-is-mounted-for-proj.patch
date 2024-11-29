@@ -1,4 +1,4 @@
-From ad4896b5b343e019b9042ac5a964f12ed4444818 Mon Sep 17 00:00:00 2001
+From 0ad80139c5cdea51a48b47ee1e0031e2cf760146 Mon Sep 17 00:00:00 2001
 From: Maru Newby <me@maru.ca>
 Date: Mon, 10 May 2021 15:00:03 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Ensure service ca is mounted for projected
@@ -801,5 +801,5 @@ index 0a4f2363775..279e91be8d6 100644
    kind: ClusterRole
    metadata:
 -- 
-2.47.0
+2.47.1
 

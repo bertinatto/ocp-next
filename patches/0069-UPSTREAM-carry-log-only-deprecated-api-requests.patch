@@ -1,4 +1,4 @@
-From a72b345b0f85d1a6cbcf520428687cabf6a8064f Mon Sep 17 00:00:00 2001
+From 6d5c718596b89cdf60be7251b1d037563b19a7ab Mon Sep 17 00:00:00 2001
 From: Luis Sanchez <sanchezl@redhat.com>
 Date: Thu, 29 Aug 2024 00:06:38 -0400
 Subject: [PATCH] UPSTREAM: <carry>: log only deprecated api requests
@@ -175,5 +175,5 @@ index 12d1606d6fa..d4183340e43 100644
  			user.GetName(),
  			req.UserAgent(),
 -- 
-2.47.0
+2.47.1
 

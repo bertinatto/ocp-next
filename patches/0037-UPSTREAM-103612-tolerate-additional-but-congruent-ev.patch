@@ -1,4 +1,4 @@
-From c28885bb8bd531d13d9c1bcde4973b5b7a25ec8e Mon Sep 17 00:00:00 2001
+From 76aa496409501aa61d3479c7a1432f0604a6bf0b Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Fri, 9 Jul 2021 10:30:56 -0400
 Subject: [PATCH] UPSTREAM: 103612: tolerate additional, but congruent, events
@@ -64,5 +64,5 @@ index 2df67fd8b44..a89426b49cd 100644
  		}
  
 -- 
-2.47.0
+2.47.1
 

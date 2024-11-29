@@ -1,4 +1,4 @@
-From 7c809524cd07149d4b680a38c30ef0330871eac6 Mon Sep 17 00:00:00 2001
+From 138503bcd9ca75bb383fcccdb30f87ecfb726ef2 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: hardcoded restmapper with a few entries to
@@ -44,5 +44,5 @@ index 00000000000..bce6453ee5f
 +	return openshiftrestmapper.NewOpenShiftHardcodedRESTMapper(delegate)
 +}
 -- 
-2.47.0
+2.47.1
 

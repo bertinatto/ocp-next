@@ -1,4 +1,4 @@
-From 48cc79cfa2eb991fb250f14a735867b750fd75bd Mon Sep 17 00:00:00 2001
+From ad763bf7fc0548b09848d451d35c873a218c7e5a Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Wed, 7 Jul 2021 11:25:01 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add max_housekeeping_interval
@@ -82,5 +82,5 @@ index 414232775f1..1ef1ac62303 100644
  	if goos == "windows" {
  		return windowsEtcHostsPath
 -- 
-2.47.0
+2.47.1
 

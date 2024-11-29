@@ -1,4 +1,4 @@
-From baff1b347d739587ce94f540f972311043389b0c Mon Sep 17 00:00:00 2001
+From 7e2307d6984cdfd7e26f16a49d6b15a1f8b90f21 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Mon, 8 Feb 2021 18:04:54 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: ignore SIGTERM/INT after
@@ -12,24 +12,32 @@ as library-go.
 
 OpenShift-Rebase-Source: 63ed2006a96
 ---
- cmd/kube-apiserver/app/server.go              |  3 +-
+ cmd/kube-apiserver/app/server.go              |  4 +--
  .../src/k8s.io/apiserver/pkg/server/signal.go | 29 +++++++++++++++++--
- 2 files changed, 29 insertions(+), 3 deletions(-)
+ 2 files changed, 29 insertions(+), 4 deletions(-)
 
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 52849ee9603..6c35da14b99 100644
+index 11ad2dbc833..ae2259c26c3 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
-@@ -157,7 +157,8 @@ cluster's shared state through which all other components interact.`,
+@@ -71,8 +71,7 @@ func NewAPIServerCommand() *cobra.Command {
+ 	_, featureGate := featuregate.DefaultComponentGlobalsRegistry.ComponentGlobalsOrRegister(
+ 		featuregate.DefaultKubeComponent, utilversion.DefaultBuildEffectiveVersion(), utilfeature.DefaultMutableFeatureGate)
+ 	s := options.NewServerRunOptions()
+-	ctx := genericapiserver.SetupSignalContext()
+-
++	ctx := genericapiserver.SetupSignalContextNotExiting()
+ 	cmd := &cobra.Command{
+ 		Use: "kube-apiserver",
+ 		Long: `The Kubernetes API server validates and configures data
+@@ -157,6 +156,7 @@ cluster's shared state through which all other components interact.`,
  			return nil
  		},
  	}
--	cmd.SetContext(ctx)
 +
-+	cmd.SetContext(genericapiserver.SetupSignalContextNotExiting())
+ 	cmd.SetContext(ctx)
  
  	fs := cmd.Flags()
- 	namedFlagSets := s.Flags()
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/signal.go b/staging/src/k8s.io/apiserver/pkg/server/signal.go
 index e5334ae4c15..bdd2728f8ab 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/signal.go
@@ -89,5 +97,5 @@ index e5334ae4c15..bdd2728f8ab 100644
  
  	return ctx
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 416e00b8d10b8a55da3ddd00cea03056b94e6ec4 Mon Sep 17 00:00:00 2001
+From 2ae7bf31b7e154bb9b0162d154266b220ef6c791 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 26 Aug 2021 12:38:01 +0200
 Subject: [PATCH] UPSTREAM: <carry>: sets X-OpenShift-Internal-If-Not-Ready
@@ -28,7 +28,7 @@ index 38b64663b18..3f79b64304c 100644
 +	CustomRoundTrippers                 []transport.WrapperFunc
  }
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index ee210164695..5795bf5662f 100644
+index 9a05925fc81..5d328f05373 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -134,7 +134,7 @@ controller, and serviceaccounts controller.`,
@@ -205,5 +205,5 @@ index 00000000000..7ab5a7662ec
 +	return rt(r)
 +}
 -- 
-2.47.0
+2.47.1
 

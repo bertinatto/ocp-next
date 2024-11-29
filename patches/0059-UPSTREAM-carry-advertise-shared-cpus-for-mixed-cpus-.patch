@@ -1,4 +1,4 @@
-From ca0e1871999956d25e5ce02e15203da834c7d32a Mon Sep 17 00:00:00 2001
+From 153464e2ad46a936220eac6e01fb669e2dee209a Mon Sep 17 00:00:00 2001
 From: Talor Itzhak <titzhak@redhat.com>
 Date: Thu, 9 Nov 2023 13:55:08 +0200
 Subject: [PATCH] UPSTREAM: <carry>: advertise shared cpus for mixed cpus
@@ -21,10 +21,10 @@ Signed-off-by: Talor Itzhak <titzhak@redhat.com>
  create mode 100644 pkg/kubelet/sharedcpus/sharedcpus_test.go
 
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index 8e7038a591f..d23ea12a778 100644
+index 1ef1ac62303..15937cb839e 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -108,6 +108,7 @@ import (
+@@ -113,6 +113,7 @@ import (
  	"k8s.io/kubernetes/pkg/kubelet/server"
  	servermetrics "k8s.io/kubernetes/pkg/kubelet/server/metrics"
  	serverstats "k8s.io/kubernetes/pkg/kubelet/server/stats"
@@ -32,7 +32,7 @@ index 8e7038a591f..d23ea12a778 100644
  	"k8s.io/kubernetes/pkg/kubelet/stats"
  	"k8s.io/kubernetes/pkg/kubelet/status"
  	"k8s.io/kubernetes/pkg/kubelet/sysctl"
-@@ -651,6 +652,9 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
+@@ -681,6 +682,9 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
  	if managed.IsEnabled() {
  		klog.InfoS("Pinned Workload Management Enabled")
  	}
@@ -43,10 +43,10 @@ index 8e7038a591f..d23ea12a778 100644
  	if kubeDeps.KubeClient != nil {
  		klet.runtimeClassManager = runtimeclass.NewManager(kubeDeps.KubeClient)
 diff --git a/pkg/kubelet/kubelet_node_status.go b/pkg/kubelet/kubelet_node_status.go
-index 94529e9addb..ebf549abe83 100644
+index 6d7156070b6..7b34b0a48c6 100644
 --- a/pkg/kubelet/kubelet_node_status.go
 +++ b/pkg/kubelet/kubelet_node_status.go
-@@ -45,6 +45,7 @@ import (
+@@ -46,6 +46,7 @@ import (
  	"k8s.io/kubernetes/pkg/kubelet/events"
  	"k8s.io/kubernetes/pkg/kubelet/managed"
  	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
@@ -54,7 +54,7 @@ index 94529e9addb..ebf549abe83 100644
  	taintutil "k8s.io/kubernetes/pkg/util/taints"
  	volutil "k8s.io/kubernetes/pkg/volume/util"
  )
-@@ -135,6 +136,7 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
+@@ -136,6 +137,7 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
  	if managed.IsEnabled() {
  		requiresUpdate = kl.addManagementNodeCapacity(node, existingNode) || requiresUpdate
  	}
@@ -62,7 +62,7 @@ index 94529e9addb..ebf549abe83 100644
  	if requiresUpdate {
  		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, existingNode); err != nil {
  			klog.ErrorS(err, "Unable to reconcile node with API server,error updating node", "node", klog.KObj(node))
-@@ -164,6 +166,25 @@ func (kl *Kubelet) addManagementNodeCapacity(initialNode, existingNode *v1.Node)
+@@ -165,6 +167,25 @@ func (kl *Kubelet) addManagementNodeCapacity(initialNode, existingNode *v1.Node)
  	return true
  }
  
@@ -88,7 +88,7 @@ index 94529e9addb..ebf549abe83 100644
  // reconcileHugePageResource will update huge page capacity for each page size and remove huge page sizes no longer supported
  func (kl *Kubelet) reconcileHugePageResource(initialNode, existingNode *v1.Node) bool {
  	requiresUpdate := updateDefaultResources(initialNode, existingNode)
-@@ -458,6 +479,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
+@@ -459,6 +480,7 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
  	if managed.IsEnabled() {
  		kl.addManagementNodeCapacity(node, node)
  	}
@@ -235,5 +235,5 @@ index 00000000000..63e7914f0ff
 +	}
 +}
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From c20715ad8f2c203cf46ec24b3af01c2900da5c3f Mon Sep 17 00:00:00 2001
+From e347750838fa17ce38c1a8941e4a2acb43d5ddc3 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Filip=20K=C5=99epinsk=C3=BD?= <atiratree@gmail.com>
 Date: Thu, 22 Aug 2024 12:23:43 +0200
 Subject: [PATCH] UPSTREAM: <carry>: skip Kubectl logs tests until the oc is
@@ -24,5 +24,5 @@ index 99441e26d65..da7642b9cc9 100644
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
 -- 
-2.47.0
+2.47.1
 

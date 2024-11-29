@@ -1,4 +1,4 @@
-From c292f5345fdb9e5e5f942d72713ca12fae740d2c Mon Sep 17 00:00:00 2001
+From 927946ac91eb7d785cd532db7bd8a69728e2566f Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Mon, 3 Apr 2023 14:44:02 -0300
 Subject: [PATCH] UPSTREAM: <carry>: APISelfSubjectReview: only test v1beta1
@@ -44,5 +44,5 @@ index c617edd9806..e309c3d78e4 100644
  			config := restConfig(f)
  
 -- 
-2.47.0
+2.47.1
 

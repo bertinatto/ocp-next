@@ -1,4 +1,4 @@
-From 5deb72ed8aa4cb46e175a414d6280d9fc7a43d30 Mon Sep 17 00:00:00 2001
+From 0798010e9a30289d9379ce84ebfa8d6c1e180383 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: exclude some
@@ -50,5 +50,5 @@ index 00000000000..bf246aaccb1
 +	}
 +}
 -- 
-2.47.0
+2.47.1
 

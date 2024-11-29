@@ -1,4 +1,4 @@
-From bf2bf324d89c6ce90a17b31620b3623c8ae434bc Mon Sep 17 00:00:00 2001
+From 308c9466313578af48d4b23d7738113d9014207b Mon Sep 17 00:00:00 2001
 From: Stanislav Laznicka <slaznick@redhat.com>
 Date: Mon, 16 Jan 2023 14:18:15 +0100
 Subject: [PATCH] UPSTREAM: <carry>: PSa metrics: log platform namespaces in
@@ -137,5 +137,5 @@ index 657e1aa6d56..cd9e3e7fea0 100644
  	"pod_security_exemptions_total": {
  		`pod_security_exemptions_total{request_operation="create",resource="controller",subresource=""}`,
 -- 
-2.47.0
+2.47.1
 

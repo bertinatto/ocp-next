@@ -1,4 +1,4 @@
-From 909b7b47d4d8c0b08dcf0ccdaee16a68421c9245 Mon Sep 17 00:00:00 2001
+From be914a521624fb73d819bc51a26fe2f7f02ccf43 Mon Sep 17 00:00:00 2001
 From: Maciej Szulik <maszulik@redhat.com>
 Date: Wed, 21 Jul 2021 10:37:40 +0200
 Subject: [PATCH] UPSTREAM: <carry>: export HandleFlags
@@ -67,5 +67,5 @@ index 00000000000..c0aecd32cda
 +	flag.Parse()
 +}
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 2216cbcab54c6c3a4845461c299c70d4175e4700 Mon Sep 17 00:00:00 2001
+From 6d837be7a0adf6a64b06c946394217253fd290a2 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: add our immortal
@@ -32,5 +32,5 @@ index 936a95e45cc..cec6769c65d 100644
  }
  
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 1d1a0d755544f249451d493c695b02a083bc2df2 Mon Sep 17 00:00:00 2001
+From 924f29b75654c01311705644f9e4400fd4baa896 Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -13,13 +13,14 @@ Fix handling of the "until" parameter when generating the journalctl
 command. This was incorrectly being passed with the "since" value.
 ---
  pkg/features/versioned_kube_features.go       |   4 +-
- .../apis/config/validation/validation_test.go |   1 +
+ .../apis/config/validation/validation_test.go |   2 +
  pkg/kubelet/kubelet.go                        |   7 +-
  pkg/kubelet/kubelet_server_journal.go         | 111 +++++++++++++++---
  pkg/kubelet/kubelet_server_journal_linux.go   |  23 +++-
  pkg/kubelet/kubelet_server_journal_test.go    |  50 +++++---
  pkg/kubelet/kubelet_server_journal_windows.go |   9 +-
- 7 files changed, 162 insertions(+), 43 deletions(-)
+ .../test_data/versioned_feature_list.yaml     |   4 +-
+ 8 files changed, 165 insertions(+), 45 deletions(-)
 
 diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
 index 9b8bbc6958f..7e3883a7a99 100644
@@ -37,7 +38,7 @@ index 9b8bbc6958f..7e3883a7a99 100644
  
  	NodeSwap: {
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
-index 802c5506d37..8354fdb2334 100644
+index 802c5506d37..a8bcabf8553 100644
 --- a/pkg/kubelet/apis/config/validation/validation_test.go
 +++ b/pkg/kubelet/apis/config/validation/validation_test.go
 @@ -389,6 +389,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
@@ -48,6 +49,14 @@ index 802c5506d37..8354fdb2334 100644
  			return conf
  		},
  		errMsg: "invalid configuration: CrashLoopBackOff.MaxContainerRestartPeriod (got: 0 seconds) must be set between 1s and 300s",
+@@ -613,6 +614,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+ 		}, {
+ 			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
+ 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
++				conf.FeatureGates = map[string]bool{"NodeLogQuery": false}
+ 				conf.EnableSystemLogQuery = true
+ 				return conf
+ 			},
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
 index b8bbfece860..e44d877c8fe 100644
 --- a/pkg/kubelet/kubelet.go
@@ -463,6 +472,24 @@ index a805cfc5453..5134d65e8d2 100644
  		psCmd += fmt.Sprintf("; EndTime='%s'", n.UntilTime.Format(dateLayout))
  	}
  	var providers []string
+diff --git a/test/featuregates_linter/test_data/versioned_feature_list.yaml b/test/featuregates_linter/test_data/versioned_feature_list.yaml
+index 3e355898dd7..1caa8b9815f 100644
+--- a/test/featuregates_linter/test_data/versioned_feature_list.yaml
++++ b/test/featuregates_linter/test_data/versioned_feature_list.yaml
+@@ -824,11 +824,11 @@
+     version: "1.26"
+ - name: NodeLogQuery
+   versionedSpecs:
+-  - default: false
++  - default: true
+     lockToDefault: false
+     preRelease: Alpha
+     version: "1.27"
+-  - default: false
++  - default: true
+     lockToDefault: false
+     preRelease: Beta
+     version: "1.30"
 -- 
-2.47.0
+2.47.1
 

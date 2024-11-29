@@ -1,4 +1,4 @@
-From bc73f2a02d39337cd5f81a02b32c9bb76d5864df Mon Sep 17 00:00:00 2001
+From 8899a7527b088e129ea71addf7ab2f507ca093bf Mon Sep 17 00:00:00 2001
 From: Ilias Rinis <irinis@redhat.com>
 Date: Wed, 1 Mar 2023 17:20:38 +0100
 Subject: [PATCH] UPSTREAM: <carry>: selfsubjectaccessreview: grant user:full
@@ -296,5 +296,5 @@ index 00000000000..31ac1d5c5e9
 +	}
 +}
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From d05d9667a13c54e999ea92523b8f737ba62b4ab5 Mon Sep 17 00:00:00 2001
+From 3559ac3975d28a3680097a36a0f07b8a1621f4fd Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -261,7 +261,7 @@ index ebed12af1d6..17c940a734d 100644
  	return fss
  }
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 8aa05a4d8f8..52849ee9603 100644
+index 8aa05a4d8f8..11ad2dbc833 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
 @@ -25,6 +25,10 @@ import (
@@ -299,7 +299,7 @@ index 8aa05a4d8f8..52849ee9603 100644
 +					return err
 +				}
 +				// initialize feature gates again with the new flags
-+				if err := utilversion.DefaultComponentGlobalsRegistry.Set(); err != nil {
++				if err := featuregate.DefaultComponentGlobalsRegistry.Set(); err != nil {
 +					return err
 +				}
 +
@@ -625,5 +625,5 @@ literal 0
 HcmV?d00001
 
 -- 
-2.47.0
+2.47.1
 

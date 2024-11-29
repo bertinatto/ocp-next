@@ -1,4 +1,4 @@
-From b6bc04d9f82b3a36149def56f2f17507f08fd33e Mon Sep 17 00:00:00 2001
+From 65d7c1e62cc68bb897dec07d203138ab5e568063 Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Mon, 13 Mar 2023 11:30:57 -0400
 Subject: [PATCH] UPSTREAM: 115328: annotate early and late requests
@@ -21,10 +21,10 @@ UPSTREAM: <carry>: add conditional shutdown response header
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/lifecycle_signals_test.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 96feaac6eb0..d17a9ecdd4b 100644
+index 03d4b711d9a..f58be04f5f8 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -1083,6 +1083,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1085,6 +1085,8 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	handler = genericapifilters.WithAudit(handler, c.AuditBackend, c.AuditPolicyRuleEvaluator, c.LongRunningFunc)
  	handler = filterlatency.TrackStarted(handler, c.TracerProvider, "audit")
  
@@ -33,7 +33,7 @@ index 96feaac6eb0..d17a9ecdd4b 100644
  	failedHandler := genericapifilters.Unauthorized(c.Serializer)
  	failedHandler = genericapifilters.WithFailedAuthenticationAudit(failedHandler, c.AuditBackend, c.AuditPolicyRuleEvaluator)
  
-@@ -1118,6 +1120,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1120,6 +1122,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
  	}
  	handler = genericfilters.WithOptInRetryAfter(handler, c.newServerFullyInitializedFunc())
@@ -769,5 +769,5 @@ index 00000000000..afc734f477c
 +	}
 +}
 -- 
-2.47.0
+2.47.1
 

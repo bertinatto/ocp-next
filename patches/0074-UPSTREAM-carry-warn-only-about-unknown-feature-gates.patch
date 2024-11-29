@@ -1,0 +1,27 @@
+From c9f105c0477eac9052669e0361411c3eac51560c Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Thu, 28 Nov 2024 07:28:30 -0300
+Subject: [PATCH] UPSTREAM: <carry>: warn only about unknown feature gates
+
+---
+ pkg/kubelet/apis/config/validation/validation_test.go | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
+index a8bcabf8553..fdfe74c8acc 100644
+--- a/pkg/kubelet/apis/config/validation/validation_test.go
++++ b/pkg/kubelet/apis/config/validation/validation_test.go
+@@ -722,7 +722,9 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+ 				conf.FeatureGates["invalid"] = true
+ 				return conf
+ 			},
+-			errMsg: "unrecognized feature gate: invalid",
++			// In OpenShift we need to tolerate unrecognized feature gates
++			// errMsg: "unrecognized feature gate: invalid",
++			errMsg: "",
+ 		},
+ 	}
+ 
+-- 
+2.47.1
+

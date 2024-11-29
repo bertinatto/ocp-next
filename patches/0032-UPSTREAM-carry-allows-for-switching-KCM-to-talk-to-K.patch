@@ -1,4 +1,4 @@
-From e45bfbf08b98b08fa027f8a8aa63c3ade2152d0b Mon Sep 17 00:00:00 2001
+From 58f275842dcc76932a6859c1567a1959630dd078 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 4 Mar 2021 09:58:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: allows for switching KCM to talk to Kube
@@ -45,7 +45,7 @@ index a7112d003d4..38b64663b18 100644
 +	PreferredHostHealthMonitor          *health.Prober
  }
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index 4174f962da9..48f2ffe819c 100644
+index 4da8c44e333..f5c73db7b8e 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -79,6 +79,8 @@ import (
@@ -87,7 +87,7 @@ index 4174f962da9..48f2ffe819c 100644
  	// Setup any healthz checks we will want to use.
  	var checks []healthz.HealthChecker
  	var electionChecker *leaderelection.HealthzAdaptor
-@@ -855,7 +873,7 @@ func createClientBuilders(c *config.CompletedConfig) (clientBuilder clientbuilde
+@@ -858,7 +876,7 @@ func createClientBuilders(c *config.CompletedConfig) (clientBuilder clientbuilde
  	if c.ComponentConfig.KubeCloudShared.UseServiceAccountCredentials {
  
  		clientBuilder = clientbuilder.NewDynamicClientBuilder(
@@ -208,5 +208,5 @@ index 5d85c022993..9286fa77cc3 100644
 +	return &restConfigCopy
 +}
 -- 
-2.47.0
+2.47.1
 

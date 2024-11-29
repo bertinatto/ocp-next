@@ -1,4 +1,4 @@
-From ffb455228b4a9ea993041a5595edb06315707452 Mon Sep 17 00:00:00 2001
+From d51e193c5a920de6c0e09fea8e58b5f26008f524 Mon Sep 17 00:00:00 2001
 From: Michal Fojtik <mfojtik@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: <carry>: patch aggregator to allow delegating
@@ -43,7 +43,7 @@ index 578a196aa37..8cd7a7c8bb7 100644
  	crds, err := c.crdLister.List(labels.Everything())
  	if err != nil {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index 1d14c5273a6..164875e5caa 100644
+index 3c5799d6991..096b37de543 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 @@ -160,6 +160,9 @@ type APIAggregator struct {
@@ -192,5 +192,5 @@ index 00000000000..f7169c0d1ab
 +	return false
 +}
 -- 
-2.47.0
+2.47.1
 

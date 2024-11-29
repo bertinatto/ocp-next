@@ -1,4 +1,4 @@
-From 731ce4f324862dcc3fc1ad1da5e34ac3bcdf517d Mon Sep 17 00:00:00 2001
+From 1b908db6da4fbbf5499f3ccc33d594c67dcd9549 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:57 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: wire through isTerminating
@@ -21,7 +21,7 @@ OpenShift-Rebase-Source: a736659ee67
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/patch_config.go
 
 diff --git a/cmd/kube-scheduler/app/server.go b/cmd/kube-scheduler/app/server.go
-index 30c8fca17c8..e1ccda21e20 100644
+index 1785bbdcc91..28eb9195179 100644
 --- a/cmd/kube-scheduler/app/server.go
 +++ b/cmd/kube-scheduler/app/server.go
 @@ -325,7 +325,7 @@ func buildHandlerChain(handler http.Handler, authn authenticator.Request, authz
@@ -34,10 +34,10 @@ index 30c8fca17c8..e1ccda21e20 100644
  
  	return handler
 diff --git a/pkg/kubelet/server/server.go b/pkg/kubelet/server/server.go
-index f983e1d362b..6e539655f9e 100644
+index 46ac2403d1d..b30c6fc7d0d 100644
 --- a/pkg/kubelet/server/server.go
 +++ b/pkg/kubelet/server/server.go
-@@ -1072,7 +1072,7 @@ var statusesNoTracePred = httplog.StatusIsNot(
+@@ -1118,7 +1118,7 @@ var statusesNoTracePred = httplog.StatusIsNot(
  
  // ServeHTTP responds to HTTP requests on the Kubelet.
  func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -47,10 +47,10 @@ index f983e1d362b..6e539655f9e 100644
  	// monitor http requests
  	var serverType string
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index fe9dca9dcc8..bf29e660b42 100644
+index ee037aefed2..b3bc7d68aa2 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -1057,7 +1057,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1059,7 +1059,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	if c.ShutdownSendRetryAfter {
  		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
  	}
@@ -259,5 +259,5 @@ index 0f1e1fec60e..2a99efbddab 100644
  
  	return handler
 -- 
-2.47.0
+2.47.1
 

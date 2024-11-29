@@ -1,4 +1,4 @@
-From bf7fc44598432394a1b8d91b927c2fd8e54f65bc Mon Sep 17 00:00:00 2001
+From d9f8f59954c0048fbffc9ebf990a13ffecdf5136 Mon Sep 17 00:00:00 2001
 From: Dan Winship <danwinship@redhat.com>
 Date: Wed, 21 Aug 2024 13:17:04 -0400
 Subject: [PATCH] UPSTREAM: <carry>: Fix default skips in
@@ -31,5 +31,5 @@ index 9292de265a0..ea005aee55a 100755
  # Support serial and parallel test suites
  TEST_SUITE="${TEST_SUITE:-parallel}"
 -- 
-2.47.0
+2.47.1
 

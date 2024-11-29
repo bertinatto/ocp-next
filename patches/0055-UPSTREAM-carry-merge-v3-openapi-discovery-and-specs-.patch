@@ -1,4 +1,4 @@
-From 33eb721ac5d8886f9dd7b6b595444dc4eb220324 Mon Sep 17 00:00:00 2001
+From a037444f5addd13bdfd0f17853a82df3fca18201 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Filip=20K=C5=99epinsk=C3=BD?= <atiratree@gmail.com>
 Date: Thu, 3 Aug 2023 16:48:47 +0200
 Subject: [PATCH] UPSTREAM: <carry>: merge v3 openapi discovery and specs for
@@ -454,5 +454,5 @@ index 00000000000..4c9be46a28b
 +	return nil
 +}
 -- 
-2.47.0
+2.47.1
 

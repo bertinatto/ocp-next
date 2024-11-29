@@ -1,0 +1,85 @@
+From e11a8fc933a19cf0c32ef7659737764cb40161a7 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Thu, 28 Nov 2024 10:13:05 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ hack/make-rules/test.sh                                |  3 ++-
+ openshift-hack/e2e/annotate/rules.go                   | 10 +++++++---
+ .../code-generator/examples/hack/verify-codegen.sh     |  2 ++
+ staging/src/k8s.io/code-generator/kube_codegen.sh      |  2 ++
+ 4 files changed, 13 insertions(+), 4 deletions(-)
+
+diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
+index afddf8df982..d2326809a34 100755
+--- a/hack/make-rules/test.sh
++++ b/hack/make-rules/test.sh
+@@ -52,7 +52,8 @@ kube::test::find_go_packages() {
+             -e '^k8s.io/kubernetes/test/e2e$' \
+             -e '^k8s.io/kubernetes/test/e2e_node(/.*)?$' \
+             -e '^k8s.io/kubernetes/test/e2e_kubeadm(/.*)?$' \
+-            -e '^k8s.io/.*/test/integration(/.*)?$'
++            -e '^k8s.io/.*/test/integration(/.*)?$' \
++            -e '^k8s.io/kubernetes/openshift-hack/e2e(/.*)?$'
+   )
+ }
+ 
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index da7642b9cc9..7231bc8e2b4 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -11,17 +11,21 @@ var (
+ 		"[Disabled:Alpha]": {
+ 			`\[Feature:StorageVersionAPI\]`,
+ 			`\[Feature:InPlacePodVerticalScaling\]`,
+-			`\[Feature:RecoverVolumeExpansionFailure\]`,
+-			`\[Feature:WatchList\]`,
+ 			`\[Feature:ServiceCIDRs\]`,
+ 			`\[Feature:ClusterTrustBundle\]`,
+ 			`\[Feature:SELinuxMount\]`,
+ 			`\[FeatureGate:SELinuxMount\]`,
+-			`\[Feature:RelaxedEnvironmentVariableValidation\]`,
+ 			`\[Feature:UserNamespacesPodSecurityStandards\]`,
+ 			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
+ 			`\[Feature:DynamicResourceAllocation\]`,
+ 			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
++			// 4.19
++			`\[Feature:PodLevelResources\]`,
++			`\[Feature:SchedulerAsyncPreemption\]`,
++			`\[Feature:RelaxedDNSSearchValidation\]`,
++			`\[Feature:PodLogsQuerySplitStreams\]`,
++			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
++			`\[Feature:volumegroupsnapshot\]`,
+ 		},
+ 		// tests for features that are not implemented in openshift
+ 		"[Disabled:Unimplemented]": {
+diff --git a/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh b/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
+index 7dd5e657671..72ead8ed650 100755
+--- a/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
++++ b/staging/src/k8s.io/code-generator/examples/hack/verify-codegen.sh
+@@ -43,6 +43,8 @@ else
+   exit 1
+ fi
+ 
++GOFLAGS=-mod=readonly
++
+ # smoke test
+ echo "Smoke testing examples by compiling..."
+ pushd "${SCRIPT_ROOT}"
+diff --git a/staging/src/k8s.io/code-generator/kube_codegen.sh b/staging/src/k8s.io/code-generator/kube_codegen.sh
+index 8207da5eddd..1ae02947830 100755
+--- a/staging/src/k8s.io/code-generator/kube_codegen.sh
++++ b/staging/src/k8s.io/code-generator/kube_codegen.sh
+@@ -27,6 +27,8 @@ set -o pipefail
+ 
+ KUBE_CODEGEN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+ 
++GOFLAGS=-mod=readonly
++
+ function kube::codegen::internal::findz() {
+     # We use `find` rather than `git ls-files` because sometimes external
+     # projects use this across repos.  This is an imperfect wrapper of find,
+-- 
+2.47.1
+

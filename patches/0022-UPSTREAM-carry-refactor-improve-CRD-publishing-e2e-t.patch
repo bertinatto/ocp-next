@@ -1,4 +1,4 @@
-From 5c0d97d9b2742ba2d381b9d7d138cb90ac8ec080 Mon Sep 17 00:00:00 2001
+From eda006cdf75335a10a440e88dbb5d543c80d6a49 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:00 +0100
 Subject: [PATCH] UPSTREAM: <carry>: refactor/improve CRD publishing e2e tests
@@ -54,5 +54,5 @@ index ac816997810..a5487a88fe0 100644
  
  func cleanupCRD(ctx context.Context, f *framework.Framework, crd *crd.TestCrd) error {
 -- 
-2.47.0
+2.47.1
 

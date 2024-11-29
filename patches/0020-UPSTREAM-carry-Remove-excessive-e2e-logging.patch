@@ -1,4 +1,4 @@
-From a8959ebde9148d92ed372cbdb93d34ad49b6235a Mon Sep 17 00:00:00 2001
+From a00b44e60348613775a239841157a40d19d1732a Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:59 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Remove excessive e2e logging
@@ -84,5 +84,5 @@ index a6dc9b125d3..eb2f6386493 100644
  	}
  	return c, nil
 -- 
-2.47.0
+2.47.1
 

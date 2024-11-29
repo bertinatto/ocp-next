@@ -1,4 +1,4 @@
-From d2ad184ebef5deac73945f7e080a1b605688e976 Mon Sep 17 00:00:00 2001
+From 20845e3341e3ff7e132ff6e2b039f947822b1c3f Mon Sep 17 00:00:00 2001
 From: Stephen Benjamin <stephen@redhat.com>
 Date: Tue, 15 Oct 2024 06:21:06 -0400
 Subject: [PATCH] UPSTREAM: <carry>: Revert "Merge pull request #2067 from
@@ -178,5 +178,5 @@ index d4183340e43..12d1606d6fa 100644
  			user.GetName(),
  			req.UserAgent(),
 -- 
-2.47.0
+2.47.1
 

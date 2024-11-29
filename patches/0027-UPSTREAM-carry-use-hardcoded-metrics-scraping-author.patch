@@ -1,4 +1,4 @@
-From 6180c911b4c7200777b990fdb1496ebdaca871e7 Mon Sep 17 00:00:00 2001
+From 4c09bda3ecaeb122bf182566e19909e1c97d6f92 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Mon, 22 Feb 2021 14:11:49 -0500
 Subject: [PATCH] UPSTREAM: <carry>: use hardcoded metrics scraping authorizer
@@ -32,5 +32,5 @@ index 22fd4b18ce0..d726201fd50 100644
  		a, err := path.NewAuthorizer(s.AlwaysAllowPaths)
  		if err != nil {
 -- 
-2.47.0
+2.47.1
 

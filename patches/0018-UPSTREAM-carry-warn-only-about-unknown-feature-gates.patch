@@ -1,15 +1,31 @@
-From 148b8bda2f2613e1577eb4e7415d40fa14feae46 Mon Sep 17 00:00:00 2001
+From d6db6f7db353c32a95f80098c4009a65ceb18382 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: warn only about unknown feature gates
 
 OpenShift-Rebase-Source: a1370096b39
 ---
+ .../apis/config/validation/validation_test.go  |  4 +++-
  .../component-base/featuregate/feature_gate.go |  5 ++---
  .../featuregate/feature_gate_test.go           | 18 +++++++++++-------
  .../featuregate/registry_test.go               |  2 +-
- 3 files changed, 14 insertions(+), 11 deletions(-)
+ 4 files changed, 17 insertions(+), 12 deletions(-)
 
+diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
+index a8bcabf8553..fdfe74c8acc 100644
+--- a/pkg/kubelet/apis/config/validation/validation_test.go
++++ b/pkg/kubelet/apis/config/validation/validation_test.go
+@@ -722,7 +722,9 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+ 				conf.FeatureGates["invalid"] = true
+ 				return conf
+ 			},
+-			errMsg: "unrecognized feature gate: invalid",
++			// In OpenShift we need to tolerate unrecognized feature gates
++			// errMsg: "unrecognized feature gate: invalid",
++			errMsg: "",
+ 		},
+ 	}
+ 
 diff --git a/staging/src/k8s.io/component-base/featuregate/feature_gate.go b/staging/src/k8s.io/component-base/featuregate/feature_gate.go
 index b6f08a6cd6a..416aafc71f9 100644
 --- a/staging/src/k8s.io/component-base/featuregate/feature_gate.go
@@ -98,5 +114,5 @@ index 0c362d0d81f..1df983ecb2f 100644
  		{
  			name: "setting unknown component feature flag",
 -- 
-2.47.0
+2.47.1
 

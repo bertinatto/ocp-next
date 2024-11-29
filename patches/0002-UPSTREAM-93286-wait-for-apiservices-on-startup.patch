@@ -1,4 +1,4 @@
-From c60c5980c8d1ca689c5c0123f0f7ff4a171098da Mon Sep 17 00:00:00 2001
+From 1cf581812c60f68ea33b815cae2afeeb6bdd9a7c Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:55 +0100
 Subject: [PATCH] UPSTREAM: 93286: wait for apiservices on startup
@@ -9,7 +9,7 @@ OpenShift-Rebase-Source: 5a2488cd16c
  1 file changed, 40 insertions(+), 2 deletions(-)
 
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index d425ae7add0..1d14c5273a6 100644
+index d425ae7add0..3c5799d6991 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 @@ -20,12 +20,15 @@ import (
@@ -64,7 +64,7 @@ index d425ae7add0..1d14c5273a6 100644
 +			klog.Infof("still waiting on handling APIServices: %v", strings.Join(notYetHandledAPIServices.List(), ","))
 +
 +			return false, nil
-+		}, context.StopCh)
++		}, context.Done())
 +		return err
 +	})
  
@@ -96,5 +96,5 @@ index d425ae7add0..1d14c5273a6 100644
  	s.GenericAPIServer.Handler.NonGoRestfulMux.UnlistedHandlePrefix(proxyPath+"/", proxyHandler)
  
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 689c55175b8146612bdfe68968e7603ab81d4a1f Mon Sep 17 00:00:00 2001
+From 436361699461d6311616605ba6ab746209ffc910 Mon Sep 17 00:00:00 2001
 From: Maciej Szulik <maszulik@redhat.com>
 Date: Sat, 2 Dec 2023 11:10:05 +0100
 Subject: [PATCH] UPSTREAM: <carry>: temporarily disable reporting e2e text
@@ -162,5 +162,5 @@ index abe4bfda133..aa35cebd159 100644
  	// Only set a default host if one won't be supplied via kubeconfig
  	if len(t.Host) == 0 && len(t.KubeConfig) == 0 {
 -- 
-2.47.0
+2.47.1
 

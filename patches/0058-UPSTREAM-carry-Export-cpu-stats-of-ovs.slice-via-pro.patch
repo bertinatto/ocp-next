@@ -1,4 +1,4 @@
-From 0ff2ceec0928ee8b4c09ebc484db37e8d4402bd8 Mon Sep 17 00:00:00 2001
+From 2761eff2806ec7c6d5cfd450a5e9fa273259537f Mon Sep 17 00:00:00 2001
 From: Martin Sivak <mars@montik.net>
 Date: Thu, 31 Aug 2023 17:27:55 +0200
 Subject: [PATCH] UPSTREAM: <carry>: Export cpu stats of ovs.slice via
@@ -13,10 +13,10 @@ slice needs to be re-added to cAdvisor for monitoring purposes.
  1 file changed, 6 insertions(+)
 
 diff --git a/cmd/kubelet/app/server.go b/cmd/kubelet/app/server.go
-index 9cff6743de5..386f7d858b7 100644
+index cfcf6e7d5cd..77954246644 100644
 --- a/cmd/kubelet/app/server.go
 +++ b/cmd/kubelet/app/server.go
-@@ -755,6 +755,12 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
+@@ -756,6 +756,12 @@ func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Depend
  		cgroupRoots = append(cgroupRoots, s.SystemCgroups)
  	}
  
@@ -30,5 +30,5 @@ index 9cff6743de5..386f7d858b7 100644
  		imageFsInfoProvider := cadvisor.NewImageFsInfoProvider(s.ContainerRuntimeEndpoint)
  		kubeDeps.CAdvisorInterface, err = cadvisor.New(imageFsInfoProvider, s.RootDirectory, cgroupRoots, cadvisor.UsingLegacyCadvisorStats(s.ContainerRuntimeEndpoint), s.LocalStorageCapacityIsolation)
 -- 
-2.47.0
+2.47.1
 

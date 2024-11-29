@@ -1,4 +1,4 @@
-From 2bb0f8ca8db1a2fcfa91bb37c6b5af3fdf71346c Mon Sep 17 00:00:00 2001
+From a9bd19a129bc399b355c444101f7a9fefdbdf720 Mon Sep 17 00:00:00 2001
 From: Tomas Nozicka <tnozicka@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:29 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Release lock on KCM and KS termination
@@ -18,7 +18,7 @@ UPSTREAM: <carry>: Release lock on KCM and KS termination
  4 files changed, 105 insertions(+), 12 deletions(-)
 
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index 5795bf5662f..d563befc94c 100644
+index 5d328f05373..4b18e74aa13 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -38,6 +38,7 @@ import (
@@ -96,7 +96,7 @@ index 5795bf5662f..d563befc94c 100644
  	}
  
  	<-stopCh
-@@ -883,7 +902,7 @@ func createClientBuilders(c *config.CompletedConfig) (clientBuilder clientbuilde
+@@ -886,7 +905,7 @@ func createClientBuilders(c *config.CompletedConfig) (clientBuilder clientbuilde
  
  // leaderElectAndRun runs the leader election, and runs the callbacks once the leader lease is acquired.
  // TODO: extract this function into staging/controller-manager
@@ -105,7 +105,7 @@ index 5795bf5662f..d563befc94c 100644
  	logger := klog.FromContext(ctx)
  	rl, err := resourcelock.NewFromKubeconfig(resourceLock,
  		c.ComponentConfig.Generic.LeaderElection.ResourceNamespace,
-@@ -899,7 +918,13 @@ func leaderElectAndRun(ctx context.Context, c *config.CompletedConfig, lockIdent
+@@ -902,7 +921,13 @@ func leaderElectAndRun(ctx context.Context, c *config.CompletedConfig, lockIdent
  		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
  	}
  
@@ -218,5 +218,5 @@ index c29ada8f566..9d2cd929f21 100644
  		}
  	}(ctx)
 -- 
-2.47.0
+2.47.1
 

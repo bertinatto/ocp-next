@@ -1,4 +1,4 @@
-From 45e5765b1bbfc3458637e3e91a678eb1c5415d61 Mon Sep 17 00:00:00 2001
+From 25ba570bcc0baaf410e33c657461e14b7deeb168 Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Fri, 29 Mar 2024 16:21:28 -0400
 Subject: [PATCH] UPSTREAM: <carry>: allow type mutation for specific secrets
@@ -24,10 +24,10 @@ openshift#1929
  create mode 100644 test/integration/apiserver/openshift_secret_updates_type_mutation_test.go
 
 diff --git a/pkg/apis/core/validation/validation.go b/pkg/apis/core/validation/validation.go
-index 031f4494f51..0cf35b51946 100644
+index 694896ee750..15a5f489052 100644
 --- a/pkg/apis/core/validation/validation.go
 +++ b/pkg/apis/core/validation/validation.go
-@@ -6657,7 +6657,12 @@ func ValidateSecret(secret *core.Secret) field.ErrorList {
+@@ -6841,7 +6841,12 @@ func ValidateSecret(secret *core.Secret) field.ErrorList {
  func ValidateSecretUpdate(newSecret, oldSecret *core.Secret) field.ErrorList {
  	allErrs := ValidateObjectMetaUpdate(&newSecret.ObjectMeta, &oldSecret.ObjectMeta, field.NewPath("metadata"))
  
@@ -393,5 +393,5 @@ index 00000000000..97091fe745a
 +	}
 +}
 -- 
-2.47.0
+2.47.1
 

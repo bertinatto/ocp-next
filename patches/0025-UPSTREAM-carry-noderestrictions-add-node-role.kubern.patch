@@ -1,4 +1,4 @@
-From f6c967272aab290163c594d8e08c105417ef3005 Mon Sep 17 00:00:00 2001
+From 67224f597ce923a77a9f3909529676dda9c98a77 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:56:01 +0100
 Subject: [PATCH] UPSTREAM: <carry>: noderestrictions: add
@@ -36,10 +36,10 @@ index a6efdadb7a9..2aa2fe58796 100644
  		}
  
 diff --git a/plugin/pkg/admission/noderestriction/admission.go b/plugin/pkg/admission/noderestriction/admission.go
-index 25e4322e660..bd313cf0c23 100644
+index 81fdfafdf22..86265037f9d 100644
 --- a/plugin/pkg/admission/noderestriction/admission.go
 +++ b/plugin/pkg/admission/noderestriction/admission.go
-@@ -461,7 +461,7 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
+@@ -486,7 +486,7 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
  		// Don't allow a node to register with labels outside the allowed set.
  		// This would allow a node to add or modify its labels in a way that would let it steer privileged workloads to itself.
  		modifiedLabels := getModifiedLabels(node.Labels, nil)
@@ -48,7 +48,7 @@ index 25e4322e660..bd313cf0c23 100644
  			return admission.NewForbidden(a, fmt.Errorf("node %q is not allowed to set the following labels: %s", nodeName, strings.Join(forbiddenLabels.List(), ", ")))
  		}
  	}
-@@ -492,9 +492,10 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
+@@ -517,9 +517,10 @@ func (p *Plugin) admitNode(nodeName string, a admission.Attributes) error {
  		// Don't allow a node to update labels outside the allowed set.
  		// This would allow a node to add or modify its labels in a way that would let it steer privileged workloads to itself.
  		modifiedLabels := getModifiedLabels(node.Labels, oldNode.Labels)
@@ -60,7 +60,7 @@ index 25e4322e660..bd313cf0c23 100644
  	}
  
  	return nil
-@@ -535,7 +536,7 @@ func getLabelNamespace(key string) string {
+@@ -560,7 +561,7 @@ func getLabelNamespace(key string) string {
  }
  
  // getForbiddenLabels returns the set of labels that may not be added, removed, or modified by the node on create or update.
@@ -69,7 +69,7 @@ index 25e4322e660..bd313cf0c23 100644
  	if len(modifiedLabels) == 0 {
  		return nil
  	}
-@@ -550,6 +551,11 @@ func (p *Plugin) getForbiddenLabels(modifiedLabels sets.String) sets.String {
+@@ -575,6 +576,11 @@ func (p *Plugin) getForbiddenLabels(modifiedLabels sets.String) sets.String {
  		// forbid kubelets from setting unknown kubernetes.io and k8s.io labels on update
  		if isKubernetesLabel(label) && !kubeletapis.IsKubeletLabel(label) {
  			// TODO: defer to label policy once available
@@ -131,5 +131,5 @@ index 00000000000..9535c1702c1
 +	return openshiftNodeLabels.Has(label)
 +}
 -- 
-2.47.0
+2.47.1
 

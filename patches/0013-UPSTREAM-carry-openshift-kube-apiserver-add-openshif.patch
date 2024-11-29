@@ -1,4 +1,4 @@
-From 56970bd7419a75054ab8124266595f202d0cb048 Mon Sep 17 00:00:00 2001
+From dd468dc5243592bdc12653837a5cd5d6082f3f1e Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -22552,7 +22552,7 @@ index 00000000000..3241b9b4329
 +}
 diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 new file mode 100644
-index 00000000000..3a2008b8928
+index 00000000000..6a8dc0f91e5
 --- /dev/null
 +++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 @@ -0,0 +1,211 @@
@@ -22620,7 +22620,7 @@ index 00000000000..3a2008b8928
 +	// ADMISSION
 +	clusterQuotaMappingController := newClusterQuotaMappingController(kubeInformers.Core().V1().Namespaces(), openshiftInformers.OpenshiftQuotaInformers.Quota().V1().ClusterResourceQuotas())
 +	genericConfig.AddPostStartHookOrDie("quota.openshift.io-clusterquotamapping", func(context genericapiserver.PostStartHookContext) error {
-+		go clusterQuotaMappingController.Run(5, context.StopCh)
++		go clusterQuotaMappingController.Run(5, context.Done())
 +		return nil
 +	})
 +
@@ -22647,7 +22647,7 @@ index 00000000000..3a2008b8928
 +	}
 +	apiRequestCountController := apirequestcount.NewController(apiserverClient.APIRequestCounts(), nodeFor())
 +	genericConfig.AddPostStartHook("openshift.io-api-request-count-filter", func(context genericapiserver.PostStartHookContext) error {
-+		go apiRequestCountController.Start(context.StopCh)
++		go apiRequestCountController.Start(context.Done())
 +		return nil
 +	})
 +	genericConfig.BuildHandlerChainFunc, err = BuildHandlerChain(
@@ -22665,7 +22665,7 @@ index 00000000000..3a2008b8928
 +	genericConfig.ReadyzChecks = append(genericConfig.ReadyzChecks, openshiftAPIServiceReachabilityCheck, oauthAPIServiceReachabilityCheck)
 +
 +	genericConfig.AddPostStartHookOrDie("openshift.io-startkubeinformers", func(context genericapiserver.PostStartHookContext) error {
-+		go openshiftInformers.Start(context.StopCh)
++		go openshiftInformers.Start(context.Done())
 +		return nil
 +	})
 +	genericConfig.AddPostStartHookOrDie("openshift.io-openshift-apiserver-reachable", func(context genericapiserver.PostStartHookContext) error {
@@ -22878,7 +22878,7 @@ index 00000000000..e7a2dd2afcb
 +}
 diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go b/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go
 new file mode 100644
-index 00000000000..59f5353d295
+index 00000000000..86609b6d9de
 --- /dev/null
 +++ b/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go
 @@ -0,0 +1,146 @@
@@ -23015,7 +23015,7 @@ index 00000000000..59f5353d295
 +		// if we timeout, always return ok so that we can start from a case where all kube-apiservers are down and the SDN isn't coming up
 +		utilruntime.HandleError(fmt.Errorf("%s never reached apiserver", c.Name()))
 +		return
-+	case <-context.StopCh:
++	case <-context.Done():
 +		utilruntime.HandleError(fmt.Errorf("%s interrupted", c.Name()))
 +		return
 +	case <-noAggregatedAPIServer:
@@ -23092,5 +23092,5 @@ index 00000000000..8b34da7aa32
 +	return data, nil
 +}
 -- 
-2.47.0
+2.47.1
 

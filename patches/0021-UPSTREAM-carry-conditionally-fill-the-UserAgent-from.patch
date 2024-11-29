@@ -1,4 +1,4 @@
-From 71f0732447c82456794dc6696f5009a960a95084 Mon Sep 17 00:00:00 2001
+From 84248aa755db6cdcf59e0feea055e2c98dd1e122 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:59 +0100
 Subject: [PATCH] UPSTREAM: <carry>: conditionally fill the UserAgent from the
@@ -39,5 +39,5 @@ index eb2f6386493..1e2866431c3 100644
  		return nil, fmt.Errorf("error creating client: %v", err.Error())
  	}
 -- 
-2.47.0
+2.47.1
 

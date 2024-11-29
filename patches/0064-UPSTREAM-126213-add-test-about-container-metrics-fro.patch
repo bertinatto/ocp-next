@@ -1,4 +1,4 @@
-From 531d83178163d862990cca71101ddc19b528332c Mon Sep 17 00:00:00 2001
+From 1b2947f16c46e488f8840a345d06720f99389890 Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <rphillips@redhat.com>
 Date: Wed, 31 Jul 2024 13:12:34 -0500
 Subject: [PATCH] UPSTREAM: 126213: add test about container metrics from
@@ -258,5 +258,5 @@ index 54a9c93c055..52c9f86b702 100644
 +	recordSystemCgroupProcesses(ctx)
 +}
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From c095ec420bfd215959a38277ea07da6954f5ee5c Mon Sep 17 00:00:00 2001
+From 0be7626429cd313eeef570d243c1684f518e10d6 Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 3 Jun 2021 11:15:46 +0200
 Subject: [PATCH] UPSTREAM: <carry>: apiserver: add
@@ -21,7 +21,7 @@ Fix TestOpenAPIRequestMetrics unit test.
  6 files changed, 37 insertions(+), 30 deletions(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
-index 48fc951adee..ca97dca2224 100644
+index 0c7a3f6b92c..af1815277eb 100644
 --- a/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
 +++ b/staging/src/k8s.io/apiserver/pkg/endpoints/metrics/metrics.go
 @@ -35,7 +35,6 @@ import (
@@ -41,7 +41,7 @@ index 48fc951adee..ca97dca2224 100644
  	)
  	longRunningRequestsGauge = compbasemetrics.NewGaugeVec(
  		&compbasemetrics.GaugeOpts{
-@@ -474,9 +473,9 @@ func RecordDroppedRequest(req *http.Request, requestInfo *request.RequestInfo, c
+@@ -501,9 +500,9 @@ func RecordDroppedRequest(req *http.Request, requestInfo *request.RequestInfo, c
  	reportedVerb := cleanVerb(CanonicalVerb(strings.ToUpper(req.Method), scope), "", req, requestInfo)
  
  	if requestInfo.IsResourceRequest {
@@ -53,7 +53,7 @@ index 48fc951adee..ca97dca2224 100644
  	}
  }
  
-@@ -555,12 +554,19 @@ func MonitorRequest(req *http.Request, verb, group, version, resource, subresour
+@@ -582,12 +581,19 @@ func MonitorRequest(req *http.Request, verb, group, version, resource, subresour
  
  	dryRun := cleanDryRun(req.URL)
  	elapsedSeconds := elapsed.Seconds()
@@ -163,10 +163,10 @@ index 20ce1738d15..f94cf6427ad 100644
    - version
  - name: requested_deprecated_apis
 diff --git a/test/integration/metrics/metrics_test.go b/test/integration/metrics/metrics_test.go
-index c36188944f9..326f00e0b18 100644
+index 423db1f210d..7b056911c46 100644
 --- a/test/integration/metrics/metrics_test.go
 +++ b/test/integration/metrics/metrics_test.go
-@@ -309,42 +309,42 @@ func TestAPIServerMetricsPods(t *testing.T) {
+@@ -408,42 +408,42 @@ func TestAPIServerMetricsPods(t *testing.T) {
  			executor: func() {
  				callOrDie(c.Create(context.TODO(), makePod("foo"), metav1.CreateOptions{}))
  			},
@@ -215,7 +215,7 @@ index c36188944f9..326f00e0b18 100644
  		},
  	} {
  		t.Run(tc.name, func(t *testing.T) {
-@@ -417,42 +417,42 @@ func TestAPIServerMetricsNamespaces(t *testing.T) {
+@@ -516,42 +516,42 @@ func TestAPIServerMetricsNamespaces(t *testing.T) {
  			executor: func() {
  				callOrDie(c.Create(context.TODO(), makeNamespace("foo"), metav1.CreateOptions{}))
  			},
@@ -265,5 +265,5 @@ index c36188944f9..326f00e0b18 100644
  	} {
  		t.Run(tc.name, func(t *testing.T) {
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 2da7b0229b332fa80332ff266146f3fada032adc Mon Sep 17 00:00:00 2001
+From 38e90024f7c15b71673ca1c23a7e2a8e79d9a2df Mon Sep 17 00:00:00 2001
 From: deads2k <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: add service
@@ -12,7 +12,7 @@ OpenShift-Rebase-Source: 891b28fb321
  1 file changed, 20 insertions(+), 9 deletions(-)
 
 diff --git a/pkg/controller/serviceaccount/tokens_controller.go b/pkg/controller/serviceaccount/tokens_controller.go
-index dfacea8acfa..e974e842d9c 100644
+index eb430b2d723..3d05c894790 100644
 --- a/pkg/controller/serviceaccount/tokens_controller.go
 +++ b/pkg/controller/serviceaccount/tokens_controller.go
 @@ -41,6 +41,8 @@ import (
@@ -107,5 +107,5 @@ index dfacea8acfa..e974e842d9c 100644
  	if needsNamespace {
  		liveSecret.Data[v1.ServiceAccountNamespaceKey] = []byte(liveSecret.Namespace)
 -- 
-2.47.0
+2.47.1
 

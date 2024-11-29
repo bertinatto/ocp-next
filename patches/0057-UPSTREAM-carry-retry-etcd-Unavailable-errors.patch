@@ -1,4 +1,4 @@
-From d37e0dda915b3e71913adfe3095f8514084f98ba Mon Sep 17 00:00:00 2001
+From b47940913094ed7311571cf1fdda6780cc3ea453 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Tue, 29 Aug 2023 11:17:53 +0200
 Subject: [PATCH] UPSTREAM: <carry>: retry etcd Unavailable errors
@@ -431,5 +431,5 @@ index 49aeaec2bee..9d52eacd238 100644
  
  // startDBSizeMonitorPerEndpoint starts a loop to monitor etcd database size and update the
 -- 
-2.47.0
+2.47.1
 

@@ -1,4 +1,4 @@
-From 9ead60d8bbb38eeae65259125b757d8e9193fc83 Mon Sep 17 00:00:00 2001
+From 8786c8aefd840196a54d2792bd317b73344ddb11 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Filip=20K=C5=99epinsk=C3=BD?= <fkrepins@redhat.com>
 Date: Wed, 12 Jan 2022 13:58:58 +0100
 Subject: [PATCH] UPSTREAM: <carry>: use console-public config map for console
@@ -11,7 +11,7 @@ OpenShift-Rebase-Source: 2e5064e4056
  2 files changed, 28 insertions(+), 14 deletions(-)
 
 diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
-index 3a2008b8928..ede552e7445 100644
+index 6a8dc0f91e5..b9f73d9512e 100644
 --- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 +++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 @@ -93,8 +93,8 @@ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, k
@@ -100,5 +100,5 @@ index e7a2dd2afcb..4a7150a8699 100644
  }
  
 -- 
-2.47.0
+2.47.1
 

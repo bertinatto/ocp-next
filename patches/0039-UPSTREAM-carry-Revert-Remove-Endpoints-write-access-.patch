@@ -1,4 +1,4 @@
-From 34660cb859abec8fb66b2a419a699cc23c3fdca5 Mon Sep 17 00:00:00 2001
+From 68d724a5e74b14b8908b46c5273978487c245754 Mon Sep 17 00:00:00 2001
 From: Dan Winship <danwinship@redhat.com>
 Date: Mon, 23 Aug 2021 10:24:39 -0400
 Subject: [PATCH] UPSTREAM: <carry>: Revert "Remove Endpoints write access from
@@ -18,10 +18,10 @@ OpenShift-Rebase-Source: 239b9edabbb
  2 files changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index 85508673da1..a88474a9eb9 100644
+index ab4f27ec46c..7aac02d0101 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-@@ -314,7 +314,7 @@ func clusterRoles() []rbacv1.ClusterRole {
+@@ -325,7 +325,7 @@ func clusterRoles() []rbacv1.ClusterRole {
  				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("pods", "pods/attach", "pods/proxy", "pods/exec", "pods/portforward").RuleOrDie(),
  				rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("pods/eviction").RuleOrDie(),
  				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("replicationcontrollers", "replicationcontrollers/scale", "serviceaccounts",
@@ -43,5 +43,5 @@ index 373ce95318b..95b0a116c97 100644
      - persistentvolumeclaims
      - replicationcontrollers
 -- 
-2.47.0
+2.47.1
 

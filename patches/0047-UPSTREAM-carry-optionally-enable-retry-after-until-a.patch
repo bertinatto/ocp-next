@@ -1,4 +1,4 @@
-From f26f94fe7b8cb609564ddfd1eeeff178d5cb94d7 Mon Sep 17 00:00:00 2001
+From 1b4b356224d8fc17f47a7f7c48b87f7b223968e3 Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Wed, 17 Aug 2022 09:17:22 -0400
 Subject: [PATCH] UPSTREAM: <carry>: optionally enable retry after until
@@ -15,10 +15,10 @@ OpenShift-Rebase-Source: fc3523f8e3a
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/with_not_ready_patch_test.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 58242605cc1..96feaac6eb0 100644
+index 007b6185b0b..03d4b711d9a 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -319,6 +319,18 @@ type Config struct {
+@@ -321,6 +321,18 @@ type Config struct {
  	// This grace period is orthogonal to other grace periods, and
  	// it is not overridden by any other grace period.
  	ShutdownWatchTerminationGracePeriod time.Duration
@@ -37,7 +37,7 @@ index 58242605cc1..96feaac6eb0 100644
  }
  
  type RecommendedConfig struct {
-@@ -1059,6 +1071,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1061,6 +1073,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  		handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
  	}
  
@@ -349,5 +349,5 @@ index a4d31ef926e..ce2834924de 100644
  }
  
 -- 
-2.47.0
+2.47.1
 

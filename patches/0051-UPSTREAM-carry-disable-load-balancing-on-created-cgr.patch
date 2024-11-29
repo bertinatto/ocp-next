@@ -1,4 +1,4 @@
-From 3c57dd508e6dfd6d892ceb13f7fb12accd9ce6bd Mon Sep 17 00:00:00 2001
+From b21b4a4654d6a45963ee992805af5fe89fafc66f Mon Sep 17 00:00:00 2001
 From: Peter Hunt~ <pehunt@redhat.com>
 Date: Mon, 20 Mar 2023 11:43:25 -0400
 Subject: [PATCH] UPSTREAM: <carry>: disable load balancing on created cgroups
@@ -146,10 +146,10 @@ index ad93e971fef..d19667217d8 100644
 +	m.cpuLoadBalanceDisable = true
 +}
 diff --git a/pkg/kubelet/cm/container_manager_linux.go b/pkg/kubelet/cm/container_manager_linux.go
-index 5cad2f75a7e..145cadcdbf0 100644
+index efbd90c1d5f..27ef6a302a1 100644
 --- a/pkg/kubelet/cm/container_manager_linux.go
 +++ b/pkg/kubelet/cm/container_manager_linux.go
-@@ -250,6 +250,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
+@@ -251,6 +251,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
  	cgroupRoot := ParseCgroupfsToCgroupName(nodeConfig.CgroupRoot)
  	cgroupManager := NewCgroupManager(subsystems, nodeConfig.CgroupDriver)
  	nodeConfig.CgroupVersion = cgroupManager.Version()
@@ -173,5 +173,5 @@ index e6338d3af81..40195e9cd1d 100644
  
  // QOSContainersInfo stores the names of containers per qos
 -- 
-2.47.0
+2.47.1
 

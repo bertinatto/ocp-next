@@ -1,4 +1,4 @@
-From e0ca4f4ad541d38c6452925ed3a0bfabf4dbdcf2 Mon Sep 17 00:00:00 2001
+From 30f2ed337e987b66576a54954f8dc4a97c7301f0 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Tue, 24 Aug 2021 15:13:04 +0200
 Subject: [PATCH] UPSTREAM: <carry>: skip posting failures to aggregated APIs
@@ -27,10 +27,10 @@ OpenShift-Rebase-Source: 8558e889333
  4 files changed, 36 insertions(+), 1 deletion(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index dcda51e1746..aa8047d45e8 100644
+index e78df733b45..a091e0d717c 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -689,6 +689,11 @@ func (c *Config) ShutdownInitiatedNotify() <-chan struct{} {
+@@ -691,6 +691,11 @@ func (c *Config) ShutdownInitiatedNotify() <-chan struct{} {
  	return c.lifecycleSignals.ShutdownInitiated.Signaled()
  }
  
@@ -43,7 +43,7 @@ index dcda51e1746..aa8047d45e8 100644
  // from other fields. If you're going to `ApplyOptions`, do that first. It's mutating the receiver.
  func (c *Config) Complete(informers informers.SharedInformerFactory) CompletedConfig {
 diff --git a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
-index 164875e5caa..8df97a7cc5e 100644
+index 096b37de543..e8e7e8b70f4 100644
 --- a/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 +++ b/staging/src/k8s.io/kube-aggregator/pkg/apiserver/apiserver.go
 @@ -358,6 +358,7 @@ func (c completedConfig) NewWithDelegate(delegationTarget genericapiserver.Deleg
@@ -157,5 +157,5 @@ index acfe9ba3952..7bfef14996e 100644
  			err := c.sync(tc.apiServiceName)
  			if tc.expectedSyncError != "" {
 -- 
-2.47.0
+2.47.1
 

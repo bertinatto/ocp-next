@@ -1,4 +1,4 @@
-From add4fc10188664359a774fee7e3cf065e67d750b Mon Sep 17 00:00:00 2001
+From 12a0deb06c9a8edf6fd242d0271b4fd95bb21971 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Fri, 23 Jun 2023 14:14:11 -0400
 Subject: [PATCH] UPSTREAM: <carry>: when only this kube-apiserver can fulfill
@@ -10,7 +10,7 @@ Subject: [PATCH] UPSTREAM: <carry>: when only this kube-apiserver can fulfill
  2 files changed, 41 insertions(+), 10 deletions(-)
 
 diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
-index 45baad88b8f..8b2dae53fc0 100644
+index dee71bdf2a5..ce029240f67 100644
 --- a/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 +++ b/openshift-kube-apiserver/openshiftkubeapiserver/patch.go
 @@ -108,8 +108,8 @@ func OpenShiftKubeAPIServerConfigPatch(genericConfig *genericapiserver.Config, k
@@ -25,7 +25,7 @@ index 45baad88b8f..8b2dae53fc0 100644
  
  	genericConfig.AddPostStartHookOrDie("openshift.io-startkubeinformers", func(context genericapiserver.PostStartHookContext) error {
 diff --git a/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go b/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go
-index 59f5353d295..e89298cdc2d 100644
+index 86609b6d9de..98f22c86fb4 100644
 --- a/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go
 +++ b/openshift-kube-apiserver/openshiftkubeapiserver/sdn_readyz_wait.go
 @@ -18,22 +18,23 @@ import (
@@ -105,5 +105,5 @@ index 59f5353d295..e89298cdc2d 100644
  	//  1. if the aggregated apiserver endpoint doesn't exist, logs a warning and reports ready
  	//  2. if a connection cannot be made, after 60 seconds logs an error and reports ready -- this avoids a rebootstrapping cycle
 -- 
-2.47.0
+2.47.1
 

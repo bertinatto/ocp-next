@@ -1,4 +1,4 @@
-From 0aeb67115a7c5e3d463d88341bf5b23a023ca8d2 Mon Sep 17 00:00:00 2001
+From 9a95293b8c0cdaa8ab01fc4f23fb056e62a8d6d7 Mon Sep 17 00:00:00 2001
 From: Lukasz Szaszkiewicz <lukasz.szaszkiewicz@gmail.com>
 Date: Mon, 9 Sep 2024 14:17:56 +0200
 Subject: [PATCH] UPSTREAM: <carry>: replace newETCD3ProberMonitor with
@@ -10,7 +10,7 @@ Subject: [PATCH] UPSTREAM: <carry>: replace newETCD3ProberMonitor with
  2 files changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/storage/storagebackend/factory/etcd3.go b/staging/src/k8s.io/apiserver/pkg/storage/storagebackend/factory/etcd3.go
-index 9c8dfd7f4d8..16e6b2da490 100644
+index 9d52eacd238..5245a8eeaf4 100644
 --- a/staging/src/k8s.io/apiserver/pkg/storage/storagebackend/factory/etcd3.go
 +++ b/staging/src/k8s.io/apiserver/pkg/storage/storagebackend/factory/etcd3.go
 @@ -156,13 +156,13 @@ func newETCD3Check(c storagebackend.Config, timeout time.Duration, stopCh <-chan
@@ -52,5 +52,5 @@ index 2bf3727e8a7..0967a84cbe8 100644
  		return nil, fmt.Errorf("unknown storage type: %s", c.Type)
  	}
 -- 
-2.47.0
+2.47.1
 

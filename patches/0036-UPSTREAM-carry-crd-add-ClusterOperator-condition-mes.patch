@@ -1,4 +1,4 @@
-From 67e8bc9e407686c0b1ca51b331004a2551b98b54 Mon Sep 17 00:00:00 2001
+From 771ffc186a0762432540930f59281cbd15b0dd4a Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Wed, 16 Jun 2021 15:24:25 +0200
 Subject: [PATCH] UPSTREAM: <carry>: crd: add ClusterOperator condition message
@@ -16,10 +16,10 @@ OpenShift-Rebase-Source: 633a422a2cf
  create mode 100644 staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor/patch_clusteroperators.go
 
 diff --git a/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go b/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
-index 12a77a204e9..6787f88586e 100644
+index 55d31fc8eda..ecd70b1c5ca 100644
 --- a/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
 +++ b/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
-@@ -821,7 +821,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
+@@ -807,7 +807,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
  			utilruntime.HandleError(err)
  			return nil, fmt.Errorf("the server could not properly serve the CR columns")
  		}
@@ -28,7 +28,7 @@ index 12a77a204e9..6787f88586e 100644
  		if err != nil {
  			klog.V(2).Infof("The CRD for %v has an invalid printer specification, falling back to default printing: %v", kind, err)
  		}
-@@ -973,7 +973,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
+@@ -959,7 +959,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
  		if err != nil {
  			return nil, fmt.Errorf("the server could not properly serve the CR scale subresource columns %w", err)
  		}
@@ -188,5 +188,5 @@ index 8d933ca953d..8828e5ed6d1 100644
  
  type columnPrinter interface {
 -- 
-2.47.0
+2.47.1
 

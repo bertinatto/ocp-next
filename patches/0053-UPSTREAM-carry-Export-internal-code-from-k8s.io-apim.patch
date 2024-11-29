@@ -1,4 +1,4 @@
-From 17d7524d07b5f3ca0fa78a4e959d10922b7d323c Mon Sep 17 00:00:00 2001
+From 4b47be6320137e9409e55bfaf8e8adb6ee5af9f0 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Thu, 27 Apr 2023 09:46:33 -0300
 Subject: [PATCH] UPSTREAM: <carry>: Export internal code from
@@ -34,5 +34,5 @@ index 00000000000..ae77235ae18
 +	return internal.DecodeManagedFields(encodedManagedFields)
 +}
 -- 
-2.47.0
+2.47.1
 
