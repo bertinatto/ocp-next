@@ -19,7 +19,7 @@ func main() {
 	git.AddRemote("ocp", "https://github.com/openshift/kubernetes.git")
 	git.AddRemote("origin", "git@github.com:bertinatto/kubernetes.git")
 
-	if err := git.Fetch("upstream", "master"); err != nil {
+	if err := git.Fetch("upstream", ""); err != nil {
 		panic(err)
 	}
 
@@ -34,7 +34,8 @@ func main() {
 		panic(err)
 	}
 
-	if err := git.CreateBranch("ocp-next", "upstream/master"); err != nil {
+	if err := git.CreateBranch("ocp-next", "upstream/release-1.32"); err != nil {
+		// if err := git.CreateBranch("ocp-next", "v1.32.0-rc.0"); err != nil {
 		panic(err)
 	}
 
@@ -87,4 +88,16 @@ func main() {
 		panic(err)
 	}
 
+	err = updateVendor(git.workTree)
+	if err != nil {
+		panic(err)
+	}
+
+	if err := git.Add("."); err != nil {
+		panic(err)
+	}
+
+	if err := git.Commit("UPSTREAM: <drop>: hack/update-vendor.sh"); err != nil {
+		panic(err)
+	}
 }
