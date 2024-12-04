@@ -1,0 +1,54 @@
+From 641577cab23a9b484e294eed5fe18ddf1f2a379a Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 18 Sep 2024 10:12:40 -0300
+Subject: [PATCH] UPSTREAM: <drop>: disable ResilientWatchCacheInitialization
+ feature
+
+---
+ pkg/features/versioned_kube_features.go                        | 2 +-
+ staging/src/k8s.io/apiserver/pkg/features/kube_features.go     | 2 +-
+ test/featuregates_linter/test_data/versioned_feature_list.yaml | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
+index 7e3883a7a99..68482d987c4 100644
+--- a/pkg/features/versioned_kube_features.go
++++ b/pkg/features/versioned_kube_features.go
+@@ -307,7 +307,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+ 	},
+ 
+ 	genericfeatures.ResilientWatchCacheInitialization: {
+-		{Version: version.MustParse("1.31"), Default: true, PreRelease: featuregate.Beta},
++		{Version: version.MustParse("1.31"), Default: false, PreRelease: featuregate.Beta},
+ 	},
+ 
+ 	genericfeatures.RetryGenerateName: {
+diff --git a/staging/src/k8s.io/apiserver/pkg/features/kube_features.go b/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
+index d0b064dc2c9..9a99ee3694e 100644
+--- a/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
++++ b/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
+@@ -360,7 +360,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+ 	},
+ 
+ 	ResilientWatchCacheInitialization: {
+-		{Version: version.MustParse("1.31"), Default: true, PreRelease: featuregate.Beta},
++		{Version: version.MustParse("1.31"), Default: false, PreRelease: featuregate.Beta},
+ 	},
+ 
+ 	RetryGenerateName: {
+diff --git a/test/featuregates_linter/test_data/versioned_feature_list.yaml b/test/featuregates_linter/test_data/versioned_feature_list.yaml
+index 1caa8b9815f..f0ab0970112 100644
+--- a/test/featuregates_linter/test_data/versioned_feature_list.yaml
++++ b/test/featuregates_linter/test_data/versioned_feature_list.yaml
+@@ -1060,7 +1060,7 @@
+     version: "1.29"
+ - name: ResilientWatchCacheInitialization
+   versionedSpecs:
+-  - default: true
++  - default: false
+     lockToDefault: false
+     preRelease: Beta
+     version: "1.31"
+-- 
+2.47.1
+
