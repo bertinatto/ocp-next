@@ -1,4 +1,4 @@
-From f263c38a88787ca57cd9ad38bf24111aa78a119d Mon Sep 17 00:00:00 2001
+From 62ce505ec71e5e5311cabec88d5f40fc6262f278 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Thu, 28 Nov 2024 10:13:05 -0300
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -6,10 +6,10 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
 
 ---
  hack/make-rules/test.sh                       |  3 +-
- openshift-hack/e2e/annotate/rules.go          | 36 ++++++++++++++++---
+ openshift-hack/e2e/annotate/rules.go          | 35 ++++++++++++++++---
  .../examples/hack/verify-codegen.sh           |  2 ++
  .../src/k8s.io/code-generator/kube_codegen.sh |  2 ++
- 4 files changed, 37 insertions(+), 6 deletions(-)
+ 4 files changed, 36 insertions(+), 6 deletions(-)
 
 diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
 index afddf8df982..d2326809a34 100755
@@ -26,10 +26,10 @@ index afddf8df982..d2326809a34 100755
  }
  
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index 99441e26d65..b39f9675e8d 100644
+index 99441e26d65..27f16410e5f 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -11,17 +11,22 @@ var (
+@@ -11,17 +11,21 @@ var (
  		"[Disabled:Alpha]": {
  			`\[Feature:StorageVersionAPI\]`,
  			`\[Feature:InPlacePodVerticalScaling\]`,
@@ -51,11 +51,10 @@ index 99441e26d65..b39f9675e8d 100644
 +			`\[Feature:RelaxedDNSSearchValidation\]`,
 +			`\[Feature:PodLogsQuerySplitStreams\]`,
 +			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
-+			`\[Feature:volumegroupsnapshot\]`,
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -158,11 +163,32 @@ var (
+@@ -158,11 +162,32 @@ var (
  		"[Disabled:RebaseInProgress]": {
  			// https://issues.redhat.com/browse/OCPBUGS-7297
  			`DNS HostNetwork should resolve DNS of partial qualified names for services on hostNetwork pods with dnsPolicy`,
@@ -70,10 +69,7 @@ index 99441e26d65..b39f9675e8d 100644
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45214
 +			// Even though this feature is not GA in k/k, it will be GA in OCP 4.19, so we should fix it and unskip this test
-+			`\[Feature:volumegroupsnapshot\] VolumeGroupSnapshottable should create snapshots for multiple volumes in a pod`,
-+
-+			// https://issues.redhat.com/browse/OCPBUGS-45220
-+			// `\[sig-api-machinery\] API Streaming`,
++			`\[Feature:volumegroupsnapshot\]`,
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45273
 +			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
@@ -87,6 +83,9 @@ index 99441e26d65..b39f9675e8d 100644
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45359
 +			`\[Feature:RecoverVolumeExpansionFailure\]`,
++
++			// https://issues.redhat.com/browse/OCPBUGS-46477
++			`\[sig-storage\] In-tree Volumes \[Driver: azure-file\]`,
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {

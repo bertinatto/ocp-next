@@ -1,0 +1,64 @@
+From 98aa87a5c9945f8d99ecb041951977fd9dcba5df Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 11 Dec 2024 08:39:31 -0300
+Subject: [PATCH] UPSTREAM: 129151: kubelet: only emit one reboot event
+
+There are cases when the kubelet is starting where networking, or other
+components can cause the kubelet to not post the status with the bootId.
+The failed status update will cause the Kubelet to queue the
+NodeRebooted warning and sometimes cause many events to be created.
+
+This fix wraps the recordEventFunc to only emit one message per kubelet
+instantiation.
+---
+ pkg/kubelet/nodestatus/setters.go | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/pkg/kubelet/nodestatus/setters.go b/pkg/kubelet/nodestatus/setters.go
+index dc55f4346ee..5db76d38e6e 100644
+--- a/pkg/kubelet/nodestatus/setters.go
++++ b/pkg/kubelet/nodestatus/setters.go
+@@ -23,6 +23,7 @@ import (
+ 	"net"
+ 	goruntime "runtime"
+ 	"strings"
++	"sync"
+ 	"time"
+ 
+ 	cadvisorapiv1 "github.com/google/cadvisor/info/v1"
+@@ -57,6 +58,9 @@ const (
+ // Setters may partially mutate the node before returning an error.
+ type Setter func(ctx context.Context, node *v1.Node) error
+ 
++// Only emit one reboot event
++var rebootEvent sync.Once
++
+ // NodeAddress returns a Setter that updates address-related information on the node.
+ func NodeAddress(nodeIPs []net.IP, // typically Kubelet.nodeIPs
+ 	validateNodeIPFunc func(net.IP) error, // typically Kubelet.nodeIPValidator
+@@ -250,6 +254,7 @@ func hasAddressType(addresses []v1.NodeAddress, addressType v1.NodeAddressType)
+ 	}
+ 	return false
+ }
++
+ func hasAddressValue(addresses []v1.NodeAddress, addressValue string) bool {
+ 	for _, address := range addresses {
+ 		if address.Address == addressValue {
+@@ -311,8 +316,12 @@ func MachineInfo(nodeName string,
+ 				node.Status.NodeInfo.BootID != info.BootID {
+ 				// TODO: This requires a transaction, either both node status is updated
+ 				// and event is recorded or neither should happen, see issue #6055.
+-				recordEventFunc(v1.EventTypeWarning, events.NodeRebooted,
+-					fmt.Sprintf("Node %s has been rebooted, boot id: %s", nodeName, info.BootID))
++				//
++				// Only emit one reboot event. recordEventFunc queues events and can emit many superfluous reboot events
++				rebootEvent.Do(func() {
++					recordEventFunc(v1.EventTypeWarning, events.NodeRebooted,
++						fmt.Sprintf("Node %s has been rebooted, boot id: %s", nodeName, info.BootID))
++				})
+ 			}
+ 			node.Status.NodeInfo.BootID = info.BootID
+ 
+-- 
+2.47.1
+

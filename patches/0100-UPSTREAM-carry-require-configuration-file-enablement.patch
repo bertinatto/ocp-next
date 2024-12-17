@@ -1,0 +1,202 @@
+From 65a1a5bc696118afc4532f47f7f7c8f4d8c1fb09 Mon Sep 17 00:00:00 2001
+From: Francesco Romani <fromani@redhat.com>
+Date: Tue, 29 Oct 2024 17:31:26 +0100
+Subject: [PATCH] UPSTREAM: <carry>: require configuration file enablement
+
+similarly to what we do for the managed CPU (aka workload partitioning)
+feature, introduce a master configuration file
+`/etc/kubernetes/openshift-llc-alignment` which needs to be present for
+the LLC alignment feature to be activated, in addition to the policy
+option being required.
+
+Note this replace the standard upstream feature gate check.
+
+This can be dropped when the feature per  KEP
+https://github.com/kubernetes/enhancements/issues/4800 goes beta.
+
+Signed-off-by: Francesco Romani <fromani@redhat.com>
+---
+ pkg/kubelet/cm/cpumanager/policy_options.go   | 20 ++++++
+ .../cm/cpumanager/policy_options_test.go      | 63 +++++++++++++++++++
+ pkg/kubelet/llcalign/llcalign.go              | 46 ++++++++++++++
+ 3 files changed, 129 insertions(+)
+ create mode 100644 pkg/kubelet/llcalign/llcalign.go
+
+diff --git a/pkg/kubelet/cm/cpumanager/policy_options.go b/pkg/kubelet/cm/cpumanager/policy_options.go
+index 5b30d04a3ce..d9d571bd598 100644
+--- a/pkg/kubelet/cm/cpumanager/policy_options.go
++++ b/pkg/kubelet/cm/cpumanager/policy_options.go
+@@ -22,9 +22,11 @@ import (
+ 
+ 	"k8s.io/apimachinery/pkg/util/sets"
+ 	utilfeature "k8s.io/apiserver/pkg/util/feature"
++	"k8s.io/klog/v2"
+ 	kubefeatures "k8s.io/kubernetes/pkg/features"
+ 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
+ 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
++	"k8s.io/kubernetes/pkg/kubelet/llcalign"
+ )
+ 
+ // Names of the options, as part of the user interface.
+@@ -58,6 +60,14 @@ func CheckPolicyOptionAvailable(option string) error {
+ 		return fmt.Errorf("unknown CPU Manager Policy option: %q", option)
+ 	}
+ 
++	// must override the base feature gate check. Relevant only for alpha (disabled by default).
++	// for beta options are enabled by default and we totally want to keep the possibility to
++	// disable them explicitly.
++	if alphaOptions.Has(option) && checkPolicyOptionHasEnablementFile(option) {
++		// note that we override the decision and shortcut exit with success
++		// all other cases exit early with failure.
++		return nil
++	}
+ 	if alphaOptions.Has(option) && !utilfeature.DefaultFeatureGate.Enabled(kubefeatures.CPUManagerPolicyAlphaOptions) {
+ 		return fmt.Errorf("CPU Manager Policy Alpha-level Options not enabled, but option %q provided", option)
+ 	}
+@@ -183,3 +193,13 @@ func ValidateStaticPolicyOptions(opts StaticPolicyOptions, topology *topology.CP
+ 	}
+ 	return nil
+ }
++
++func checkPolicyOptionHasEnablementFile(option string) bool {
++	switch option {
++	case PreferAlignByUnCoreCacheOption:
++		val := llcalign.IsEnabled()
++		klog.InfoS("policy option enablement file check", "option", option, "enablementFile", val)
++		return val
++	}
++	return false
++}
+diff --git a/pkg/kubelet/cm/cpumanager/policy_options_test.go b/pkg/kubelet/cm/cpumanager/policy_options_test.go
+index e2c360bbfb7..242d33dab58 100644
+--- a/pkg/kubelet/cm/cpumanager/policy_options_test.go
++++ b/pkg/kubelet/cm/cpumanager/policy_options_test.go
+@@ -25,6 +25,7 @@ import (
+ 	pkgfeatures "k8s.io/kubernetes/pkg/features"
+ 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
+ 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
++	"k8s.io/kubernetes/pkg/kubelet/llcalign"
+ )
+ 
+ type optionAvailTest struct {
+@@ -258,3 +259,65 @@ func TestPolicyOptionsCompatibility(t *testing.T) {
+ 		})
+ 	}
+ }
++
++func TestPolicyOptionsAvailableWithEnablement(t *testing.T) {
++
++	type optionAvailEnabTest struct {
++		name                  string
++		option                string
++		featureGate           featuregate.Feature
++		featureGateEnable     bool
++		featureEnablementFlag bool
++		expectedAvailable     bool
++	}
++
++	testCases := []optionAvailEnabTest{
++		{
++			name:                  "all disabled",
++			option:                PreferAlignByUnCoreCacheOption,
++			featureGate:           pkgfeatures.CPUManagerPolicyAlphaOptions,
++			featureGateEnable:     false, // expected standard case
++			featureEnablementFlag: false,
++			expectedAvailable:     false,
++		},
++		{
++			name:                  "all enabled",
++			option:                PreferAlignByUnCoreCacheOption,
++			featureGate:           pkgfeatures.CPUManagerPolicyAlphaOptions,
++			featureGateEnable:     true, // this should not be allowed by OCP profiles
++			featureEnablementFlag: true,
++			expectedAvailable:     true,
++		},
++		{
++			name:                  "enabled by feature gate",
++			option:                PreferAlignByUnCoreCacheOption,
++			featureGate:           pkgfeatures.CPUManagerPolicyAlphaOptions,
++			featureGateEnable:     true, // this should not be allowed by OCP profiles, makes no sense either
++			featureEnablementFlag: false,
++			expectedAvailable:     true,
++		},
++		{
++			name:                  "enabled by enablement file",
++			option:                PreferAlignByUnCoreCacheOption,
++			featureGate:           pkgfeatures.CPUManagerPolicyAlphaOptions,
++			featureGateEnable:     false,
++			featureEnablementFlag: true,
++			expectedAvailable:     true,
++		},
++	}
++	for _, testCase := range testCases {
++		t.Run(testCase.name, func(t *testing.T) {
++			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, testCase.featureGate, testCase.featureGateEnable)
++			oldEnablementFlag := llcalign.TestOnlySetEnabled(testCase.featureEnablementFlag)
++
++			err := CheckPolicyOptionAvailable(testCase.option)
++
++			_ = llcalign.TestOnlySetEnabled(oldEnablementFlag)
++
++			isEnabled := (err == nil)
++			if isEnabled != testCase.expectedAvailable {
++				t.Errorf("option %q available got=%v expected=%v", testCase.option, isEnabled, testCase.expectedAvailable)
++			}
++		})
++	}
++}
+diff --git a/pkg/kubelet/llcalign/llcalign.go b/pkg/kubelet/llcalign/llcalign.go
+new file mode 100644
+index 00000000000..77293dbe528
+--- /dev/null
++++ b/pkg/kubelet/llcalign/llcalign.go
+@@ -0,0 +1,46 @@
++/*
++Copyright 2024 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package llcalign
++
++import (
++	"os"
++)
++
++var (
++	llcAlignmentEnabled  bool
++	llcAlignmentFilename = "/etc/kubernetes/openshift-llc-alignment"
++)
++
++func init() {
++	readEnablementFile()
++}
++
++func readEnablementFile() {
++	if _, err := os.Stat(llcAlignmentFilename); err == nil {
++		llcAlignmentEnabled = true
++	}
++}
++
++func IsEnabled() bool {
++	return llcAlignmentEnabled
++}
++
++func TestOnlySetEnabled(enabled bool) bool {
++	oldEnabled := llcAlignmentEnabled
++	llcAlignmentEnabled = enabled
++	return oldEnabled
++}
+-- 
+2.47.1
+

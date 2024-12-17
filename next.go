@@ -34,8 +34,8 @@ func main() {
 		panic(err)
 	}
 
-	if err := git.CreateBranch("ocp-next", "upstream/release-1.32"); err != nil {
-		// if err := git.CreateBranch("ocp-next", "v1.32.0-rc.0"); err != nil {
+	// if err := git.CreateBranch("ocp-next", "upstream/release-1.32"); err != nil {
+	if err := git.CreateBranch("ocp-next", "v1.32.0"); err != nil {
 		panic(err)
 	}
 
