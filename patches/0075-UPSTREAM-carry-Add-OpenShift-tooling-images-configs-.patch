@@ -1,4 +1,4 @@
-From 62ce505ec71e5e5311cabec88d5f40fc6262f278 Mon Sep 17 00:00:00 2001
+From 5f9f966f3507a24e60846c10833ada2937fb1d0f Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Thu, 28 Nov 2024 10:13:05 -0300
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -6,10 +6,11 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
 
 ---
  hack/make-rules/test.sh                       |  3 +-
+ openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  7 ++++
  openshift-hack/e2e/annotate/rules.go          | 35 ++++++++++++++++---
  .../examples/hack/verify-codegen.sh           |  2 ++
  .../src/k8s.io/code-generator/kube_codegen.sh |  2 ++
- 4 files changed, 36 insertions(+), 6 deletions(-)
+ 5 files changed, 43 insertions(+), 6 deletions(-)
 
 diff --git a/hack/make-rules/test.sh b/hack/make-rules/test.sh
 index afddf8df982..d2326809a34 100755
@@ -25,6 +26,31 @@ index afddf8df982..d2326809a34 100755
    )
  }
  
+diff --git a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
+index 5314527b92f..03b626a827a 100644
+--- a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
++++ b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
+@@ -1,6 +1,8 @@
+ package main
+ 
+ import (
++	"flag"
++	"k8s.io/kubernetes/test/e2e/framework"
+ 	"os"
+ 
+ 	"github.com/spf13/cobra"
+@@ -27,6 +29,11 @@ func main() {
+ 	defer logs.FlushLogs()
+ 	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
+ 
++	// These flags are used to pull in the default values to test context - required
++	// so tests run correctly, even if the underlying flags aren't used.
++	framework.RegisterCommonFlags(flag.CommandLine)
++	framework.RegisterClusterFlags(flag.CommandLine)
++
+ 	// Get version info from kube
+ 	kubeVersion := version.Get()
+ 	v.GitTreeState = kubeVersion.GitTreeState
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
 index 99441e26d65..27f16410e5f 100644
 --- a/openshift-hack/e2e/annotate/rules.go

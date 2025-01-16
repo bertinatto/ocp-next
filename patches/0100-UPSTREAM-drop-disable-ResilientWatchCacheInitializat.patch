@@ -1,6 +1,6 @@
-From 641577cab23a9b484e294eed5fe18ddf1f2a379a Mon Sep 17 00:00:00 2001
+From 651b4ea2c01fe1ba51b6669706e3c7cdbc4c0038 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
-Date: Wed, 18 Sep 2024 10:12:40 -0300
+Date: Tue, 17 Dec 2024 08:30:27 -0300
 Subject: [PATCH] UPSTREAM: <drop>: disable ResilientWatchCacheInitialization
  feature
 
@@ -11,10 +11,10 @@ Subject: [PATCH] UPSTREAM: <drop>: disable ResilientWatchCacheInitialization
  3 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
-index 7e3883a7a99..68482d987c4 100644
+index c0de606a44d..1df6ba49823 100644
 --- a/pkg/features/versioned_kube_features.go
 +++ b/pkg/features/versioned_kube_features.go
-@@ -307,7 +307,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+@@ -311,7 +311,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
  	},
  
  	genericfeatures.ResilientWatchCacheInitialization: {
@@ -24,10 +24,10 @@ index 7e3883a7a99..68482d987c4 100644
  
  	genericfeatures.RetryGenerateName: {
 diff --git a/staging/src/k8s.io/apiserver/pkg/features/kube_features.go b/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
-index d0b064dc2c9..9a99ee3694e 100644
+index c23343346e4..bbba688fbb8 100644
 --- a/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
 +++ b/staging/src/k8s.io/apiserver/pkg/features/kube_features.go
-@@ -360,7 +360,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+@@ -371,7 +371,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
  	},
  
  	ResilientWatchCacheInitialization: {
@@ -37,11 +37,11 @@ index d0b064dc2c9..9a99ee3694e 100644
  
  	RetryGenerateName: {
 diff --git a/test/featuregates_linter/test_data/versioned_feature_list.yaml b/test/featuregates_linter/test_data/versioned_feature_list.yaml
-index 1caa8b9815f..f0ab0970112 100644
+index 59e9acf691f..781e5872626 100644
 --- a/test/featuregates_linter/test_data/versioned_feature_list.yaml
 +++ b/test/featuregates_linter/test_data/versioned_feature_list.yaml
-@@ -1060,7 +1060,7 @@
-     version: "1.29"
+@@ -1066,7 +1066,7 @@
+     version: "1.32"
  - name: ResilientWatchCacheInitialization
    versionedSpecs:
 -  - default: true
