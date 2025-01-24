@@ -1,4 +1,4 @@
-From 924f29b75654c01311705644f9e4400fd4baa896 Mon Sep 17 00:00:00 2001
+From 24312c8d1cdf65599afba69abc7a4066a61a5a0e Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -17,16 +17,16 @@ command. This was incorrectly being passed with the "since" value.
  pkg/kubelet/kubelet.go                        |   7 +-
  pkg/kubelet/kubelet_server_journal.go         | 111 +++++++++++++++---
  pkg/kubelet/kubelet_server_journal_linux.go   |  23 +++-
- pkg/kubelet/kubelet_server_journal_test.go    |  50 +++++---
- pkg/kubelet/kubelet_server_journal_windows.go |   9 +-
+ pkg/kubelet/kubelet_server_journal_test.go    |  53 ++++++---
+ pkg/kubelet/kubelet_server_journal_windows.go |  13 +-
  .../test_data/versioned_feature_list.yaml     |   4 +-
- 8 files changed, 165 insertions(+), 45 deletions(-)
+ 8 files changed, 170 insertions(+), 47 deletions(-)
 
 diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
-index 9b8bbc6958f..7e3883a7a99 100644
+index ecee44abf7b..c0de606a44d 100644
 --- a/pkg/features/versioned_kube_features.go
 +++ b/pkg/features/versioned_kube_features.go
-@@ -542,8 +542,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+@@ -546,8 +546,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
  	},
  
  	NodeLogQuery: {
@@ -81,7 +81,7 @@ index b8bbfece860..e44d877c8fe 100644
  						return
  					}
 diff --git a/pkg/kubelet/kubelet_server_journal.go b/pkg/kubelet/kubelet_server_journal.go
-index 0159910803e..4ad5dcea527 100644
+index 27c3421b883..460be616fb6 100644
 --- a/pkg/kubelet/kubelet_server_journal.go
 +++ b/pkg/kubelet/kubelet_server_journal.go
 @@ -35,7 +35,7 @@ import (
@@ -274,7 +274,7 @@ index 0159910803e..4ad5dcea527 100644
  }
  
  // splitNativeVsFileLoggers checks if each service logs to native OS logs or to a file and returns a list of services
-@@ -413,3 +481,16 @@ func safeServiceName(s string) error {
+@@ -414,3 +482,16 @@ func safeServiceName(s string) error {
  	}
  	return nil
  }
@@ -292,11 +292,11 @@ index 0159910803e..4ad5dcea527 100644
 +	return fmt.Errorf("date must be a relative time of the form '(+|-)[0-9]+(s|m|h|d)' or a date in 'YYYY-MM-DD HH:MM:SS' form")
 +}
 diff --git a/pkg/kubelet/kubelet_server_journal_linux.go b/pkg/kubelet/kubelet_server_journal_linux.go
-index 0265d08fccb..6bd22c8e749 100644
+index bf550e6b946..f0104fd1bf7 100644
 --- a/pkg/kubelet/kubelet_server_journal_linux.go
 +++ b/pkg/kubelet/kubelet_server_journal_linux.go
-@@ -36,14 +36,20 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
- 	args := []string{
+@@ -40,14 +40,20 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (cmd string, args []strin
+ 	args = []string{
  		"--utc",
  		"--no-pager",
 -		"--output=short-precise",
@@ -320,7 +320,7 @@ index 0265d08fccb..6bd22c8e749 100644
  	if n.TailLines != nil {
  		args = append(args, "--pager-end", fmt.Sprintf("--lines=%d", *n.TailLines))
  	}
-@@ -54,12 +60,21 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
+@@ -58,12 +64,21 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (cmd string, args []strin
  	}
  	if len(n.Pattern) > 0 {
  		args = append(args, "--grep="+n.Pattern)
@@ -339,14 +339,31 @@ index 0265d08fccb..6bd22c8e749 100644
 +	}
 +	args = append(args, fmt.Sprintf("--output=%s", output))
 +
- 	return "journalctl", args, nil
+ 	return "journalctl", args, nil, nil
  }
  
 diff --git a/pkg/kubelet/kubelet_server_journal_test.go b/pkg/kubelet/kubelet_server_journal_test.go
-index 7e8c13c1f84..30d3ef81032 100644
+index bf42f685f45..8cf83635175 100644
 --- a/pkg/kubelet/kubelet_server_journal_test.go
 +++ b/pkg/kubelet/kubelet_server_journal_test.go
-@@ -78,10 +78,10 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -24,6 +24,7 @@ import (
+ 	"path/filepath"
+ 	"reflect"
+ 	"runtime"
++	"sort"
+ 	"strings"
+ 	"testing"
+ 	"time"
+@@ -76,6 +77,8 @@ func Test_getLoggingCmd(t *testing.T) {
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+ 			_, got, gotCmdEnv, err := getLoggingCmd(&tt.args, tt.services)
++			sort.Strings(got)
++			sort.Strings(tt.wantLinux)
+ 			switch os := runtime.GOOS; os {
+ 			case "linux":
+ 				if !reflect.DeepEqual(got, tt.wantLinux) {
+@@ -109,10 +112,10 @@ func Test_newNodeLogQuery(t *testing.T) {
  		want    *nodeLogQuery
  		wantErr bool
  	}{
@@ -360,7 +377,7 @@ index 7e8c13c1f84..30d3ef81032 100644
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02:00:00"}}, wantErr: true},
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02:00:00.000"}}, wantErr: true},
  		{query: url.Values{"sinceTime": []string{"2019-12-04 02"}}, wantErr: true},
-@@ -89,7 +89,7 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -120,7 +123,7 @@ func Test_newNodeLogQuery(t *testing.T) {
  		{query: url.Values{"sinceTime": []string{validTimeValue}},
  			want: &nodeLogQuery{options: options{SinceTime: &validT}}},
  
@@ -369,7 +386,7 @@ index 7e8c13c1f84..30d3ef81032 100644
  		{query: url.Values{"untilTime": []string{"2019-12-04 02:00:00"}}, wantErr: true},
  		{query: url.Values{"untilTime": []string{"2019-12-04 02:00:00.000"}}, wantErr: true},
  		{query: url.Values{"untilTime": []string{"2019-12-04 02"}}, wantErr: true},
-@@ -103,7 +103,6 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -134,7 +137,6 @@ func Test_newNodeLogQuery(t *testing.T) {
  
  		{query: url.Values{"pattern": []string{"foo"}}, want: &nodeLogQuery{options: options{Pattern: "foo"}}},
  
@@ -377,7 +394,7 @@ index 7e8c13c1f84..30d3ef81032 100644
  		{query: url.Values{"boot": []string{"0"}}, want: &nodeLogQuery{options: options{Boot: ptr.To(0)}}},
  		{query: url.Values{"boot": []string{"-23"}}, want: &nodeLogQuery{options: options{Boot: ptr.To(-23)}}},
  		{query: url.Values{"boot": []string{"foo"}}, wantErr: true},
-@@ -116,6 +115,11 @@ func Test_newNodeLogQuery(t *testing.T) {
+@@ -147,6 +149,11 @@ func Test_newNodeLogQuery(t *testing.T) {
  		{query: url.Values{"query": []string{"foo", "/bar"}}, want: &nodeLogQuery{Services: []string{"foo"},
  			Files: []string{"/bar"}}},
  		{query: url.Values{"query": []string{"/foo", `\bar`}}, want: &nodeLogQuery{Files: []string{"/foo", `\bar`}}},
@@ -389,7 +406,7 @@ index 7e8c13c1f84..30d3ef81032 100644
  	}
  	for _, tt := range tests {
  		t.Run(tt.query.Encode(), func(t *testing.T) {
-@@ -180,10 +184,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -211,10 +218,12 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		pattern  = "foo"
  		invalid  = "foo\\"
  	)
@@ -404,7 +421,7 @@ index 7e8c13c1f84..30d3ef81032 100644
  
  	tests := []struct {
  		name     string
-@@ -192,23 +198,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
+@@ -223,23 +232,37 @@ func Test_nodeLogQuery_validate(t *testing.T) {
  		options  options
  		wantErr  bool
  	}{
@@ -451,29 +468,45 @@ index 7e8c13c1f84..30d3ef81032 100644
  	for _, tt := range tests {
  		t.Run(tt.name, func(t *testing.T) {
 diff --git a/pkg/kubelet/kubelet_server_journal_windows.go b/pkg/kubelet/kubelet_server_journal_windows.go
-index a805cfc5453..5134d65e8d2 100644
+index ffe2df1772d..f55620de02f 100644
 --- a/pkg/kubelet/kubelet_server_journal_windows.go
 +++ b/pkg/kubelet/kubelet_server_journal_windows.go
-@@ -36,10 +36,15 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (string, []string, error)
+@@ -55,13 +55,13 @@ func getLoggingCmd(n *nodeLogQuery, services []string) (cmd string, args []strin
+ 		includeServices = append(includeServices, len(service) > 0)
  	}
  
- 	psCmd := "Get-WinEvent -FilterHashtable @{LogName='Application'"
--	if n.SinceTime != nil {
+-	args = getLoggingCmdArgs(includeSinceTime, includeUntilTime, includeTailLines, includePattern, includeServices)
++	args = getLoggingCmdArgs(n, includeSinceTime, includeUntilTime, includeTailLines, includePattern, includeServices)
+ 
+ 	return powershellExe, args, cmdEnv, nil
+ }
+ 
+ // getLoggingCmdArgs returns arguments that need to be passed to powershellExe
+-func getLoggingCmdArgs(includeSinceTime, includeUntilTime, includeTailLines, includePattern bool, services []bool) (args []string) {
++func getLoggingCmdArgs(n *nodeLogQuery, includeSinceTime, includeUntilTime, includeTailLines, includePattern bool, services []bool) (args []string) {
+ 	args = []string{
+ 		"-NonInteractive",
+ 		"-ExecutionPolicy", "Bypass",
+@@ -70,10 +70,15 @@ func getLoggingCmdArgs(includeSinceTime, includeUntilTime, includeTailLines, inc
+ 
+ 	psCmd := `Get-WinEvent -FilterHashtable @{LogName='Application'`
+ 
+-	if includeSinceTime {
 +	if len(n.Since) > 0 {
-+		psCmd += fmt.Sprintf("; StartTime='%s'", n.Since)
-+	} else if n.SinceTime != nil {
- 		psCmd += fmt.Sprintf("; StartTime='%s'", n.SinceTime.Format(dateLayout))
++		fmt.Sprintf("; StartTime='%s'", n.Since)
++	} else if includeSinceTime {
+ 		psCmd += fmt.Sprintf(`; StartTime="$Env:kubelet_sinceTime"`)
  	}
--	if n.UntilTime != nil {
+-	if includeUntilTime {
 +
 +	if len(n.Until) > 0 {
 +		psCmd += fmt.Sprintf("; EndTime='%s'", n.Until)
-+	} else if n.UntilTime != nil {
- 		psCmd += fmt.Sprintf("; EndTime='%s'", n.UntilTime.Format(dateLayout))
++	} else if includeUntilTime {
+ 		psCmd += fmt.Sprintf(`; EndTime="$Env:kubelet_untilTime"`)
  	}
- 	var providers []string
+ 
 diff --git a/test/featuregates_linter/test_data/versioned_feature_list.yaml b/test/featuregates_linter/test_data/versioned_feature_list.yaml
-index 3e355898dd7..1caa8b9815f 100644
+index a25a113071a..59e9acf691f 100644
 --- a/test/featuregates_linter/test_data/versioned_feature_list.yaml
 +++ b/test/featuregates_linter/test_data/versioned_feature_list.yaml
 @@ -824,11 +824,11 @@
