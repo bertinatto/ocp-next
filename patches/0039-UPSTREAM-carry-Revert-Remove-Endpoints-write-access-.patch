@@ -1,4 +1,4 @@
-From 68d724a5e74b14b8908b46c5273978487c245754 Mon Sep 17 00:00:00 2001
+From 00fad2882b72d28c5549eaa5851ed887096dca59 Mon Sep 17 00:00:00 2001
 From: Dan Winship <danwinship@redhat.com>
 Date: Mon, 23 Aug 2021 10:24:39 -0400
 Subject: [PATCH] UPSTREAM: <carry>: Revert "Remove Endpoints write access from
@@ -18,20 +18,20 @@ OpenShift-Rebase-Source: 239b9edabbb
  2 files changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index ab4f27ec46c..7aac02d0101 100644
+index fad0b52f9f4..333134c1f96 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-@@ -325,7 +325,7 @@ func clusterRoles() []rbacv1.ClusterRole {
- 				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("pods", "pods/attach", "pods/proxy", "pods/exec", "pods/portforward").RuleOrDie(),
- 				rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("pods/eviction").RuleOrDie(),
- 				rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("replicationcontrollers", "replicationcontrollers/scale", "serviceaccounts",
--					"services", "services/proxy", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
-+					"services", "services/proxy", "endpoints", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
- 				rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("serviceaccounts/token").RuleOrDie(),
+@@ -155,7 +155,7 @@ func editRules() []rbacv1.PolicyRule {
+ 		rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("pods", "pods/attach", "pods/proxy", "pods/exec", "pods/portforward").RuleOrDie(),
+ 		rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("pods/eviction").RuleOrDie(),
+ 		rbacv1helpers.NewRule(Write...).Groups(legacyGroup).Resources("replicationcontrollers", "replicationcontrollers/scale", "serviceaccounts",
+-			"services", "services/proxy", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
++			"services", "services/proxy", "endpoints", "persistentvolumeclaims", "configmaps", "secrets", "events").RuleOrDie(),
+ 		rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("serviceaccounts/token").RuleOrDie(),
  
- 				rbacv1helpers.NewRule(Write...).Groups(appsGroup).Resources(
+ 		rbacv1helpers.NewRule(Write...).Groups(appsGroup).Resources(
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
-index 373ce95318b..95b0a116c97 100644
+index bda30301f86..fc4edba1572 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
 @@ -134,6 +134,7 @@ items:
@@ -43,5 +43,5 @@ index 373ce95318b..95b0a116c97 100644
      - persistentvolumeclaims
      - replicationcontrollers
 -- 
-2.47.1
+2.49.0
 

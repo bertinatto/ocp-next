@@ -1,4 +1,4 @@
-From 3559ac3975d28a3680097a36a0f07b8a1621f4fd Mon Sep 17 00:00:00 2001
+From 946513882cc2043ff4f4100af13834065d7dfefb Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -238,10 +238,10 @@ parsed from the config
  create mode 100644 test/conformance/image/go-runner/testdata/tartest/out.tar.gz
 
 diff --git a/cmd/kube-apiserver/app/options/options.go b/cmd/kube-apiserver/app/options/options.go
-index ebed12af1d6..17c940a734d 100644
+index d23127e9b03..7e1341f904e 100644
 --- a/cmd/kube-apiserver/app/options/options.go
 +++ b/cmd/kube-apiserver/app/options/options.go
-@@ -61,6 +61,8 @@ type Extra struct {
+@@ -60,6 +60,8 @@ type Extra struct {
  	EndpointReconcilerType string
  
  	MasterCount int
@@ -250,7 +250,7 @@ index ebed12af1d6..17c940a734d 100644
  }
  
  // NewServerRunOptions creates and returns ServerRunOptions according to the given featureGate and effectiveVersion of the server binary to run.
-@@ -156,5 +158,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
+@@ -153,5 +155,9 @@ func (s *ServerRunOptions) Flags() (fss cliflag.NamedFlagSets) {
  		"The number of apiservers running in the cluster, must be a positive number. (In use when --endpoint-reconciler-type=master-count is enabled.)")
  	fs.MarkDeprecated("apiserver-count", "apiserver-count is deprecated and will be removed in a future version.")
  
@@ -261,7 +261,7 @@ index ebed12af1d6..17c940a734d 100644
  	return fss
  }
 diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
-index 8aa05a4d8f8..11ad2dbc833 100644
+index 042ddc9714a..d16f57cefa8 100644
 --- a/cmd/kube-apiserver/app/server.go
 +++ b/cmd/kube-apiserver/app/server.go
 @@ -25,6 +25,10 @@ import (
@@ -275,7 +275,7 @@ index 8aa05a4d8f8..11ad2dbc833 100644
  	"github.com/spf13/cobra"
  	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
  	utilerrors "k8s.io/apimachinery/pkg/util/errors"
-@@ -97,6 +101,39 @@ cluster's shared state through which all other components interact.`,
+@@ -98,6 +102,39 @@ cluster's shared state through which all other components interact.`,
  			}
  			cliflag.PrintFlags(fs)
  
@@ -316,7 +316,7 @@ index 8aa05a4d8f8..11ad2dbc833 100644
  			completedOptions, err := s.Complete(ctx)
  			if err != nil {
 diff --git a/pkg/controlplane/apiserver/config.go b/pkg/controlplane/apiserver/config.go
-index aed7e6866ec..98779d69358 100644
+index a22a0cb503e..0ab53c58747 100644
 --- a/pkg/controlplane/apiserver/config.go
 +++ b/pkg/controlplane/apiserver/config.go
 @@ -25,6 +25,10 @@ import (
@@ -339,7 +339,7 @@ index aed7e6866ec..98779d69358 100644
  	kubeClientConfig := genericConfig.LoopbackClientConfig
  	clientgoExternalClient, err := clientgoclientset.NewForConfig(kubeClientConfig)
  	if err != nil {
-@@ -360,6 +366,15 @@ func CreateConfig(
+@@ -357,6 +363,15 @@ func CreateConfig(
  	if err != nil {
  		return nil, nil, fmt.Errorf("failed to create real dynamic external client: %w", err)
  	}
@@ -467,13 +467,13 @@ index 2e3525686bd..381765d81c3 100644
  			return nil, nil, fmt.Errorf("unknown authorization mode %s specified", configuredAuthorizer.Type)
  		}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
-index 5d6e31dec44..5da84f7d7f8 100644
+index 1f7858b3011..640968b5c10 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/controller_policy.go
 @@ -160,6 +160,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
  			// resource that is owned by the service and sets blockOwnerDeletion=true in its ownerRef.
  			rbacv1helpers.NewRule("update").Groups(legacyGroup).Resources("services/finalizers").RuleOrDie(),
- 			rbacv1helpers.NewRule("get", "list", "create", "update", "delete").Groups(discoveryGroup).Resources("endpointslices").RuleOrDie(),
+ 			rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "delete").Groups(discoveryGroup).Resources("endpointslices").RuleOrDie(),
 +			rbacv1helpers.NewRule("create").Groups(discoveryGroup).Resources("endpointslices/restricted").RuleOrDie(),
  			eventsRule(),
  		},
@@ -481,7 +481,7 @@ index 5d6e31dec44..5da84f7d7f8 100644
 @@ -176,6 +177,7 @@ func buildControllerRoles() ([]rbacv1.ClusterRole, []rbacv1.ClusterRoleBinding)
  			// see https://github.com/openshift/kubernetes/blob/8691466059314c3f7d6dcffcbb76d14596ca716c/pkg/controller/endpointslicemirroring/utils.go#L87-L88
  			rbacv1helpers.NewRule("update").Groups(legacyGroup).Resources("endpoints/finalizers").RuleOrDie(),
- 			rbacv1helpers.NewRule("get", "list", "create", "update", "delete").Groups(discoveryGroup).Resources("endpointslices").RuleOrDie(),
+ 			rbacv1helpers.NewRule("get", "list", "watch", "create", "update", "delete").Groups(discoveryGroup).Resources("endpointslices").RuleOrDie(),
 +			rbacv1helpers.NewRule("create").Groups(discoveryGroup).Resources("endpointslices/restricted").RuleOrDie(),
  			eventsRule(),
  		},
@@ -558,10 +558,10 @@ index 00000000000..8f91d44c9c8
 +	return bindings
 +}
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index 947d043de46..0332c5295d6 100644
+index 34a362a2f8e..4d586ff955a 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-@@ -193,8 +193,8 @@ func NodeRules() []rbacv1.PolicyRule {
+@@ -275,8 +275,8 @@ func NodeRules() []rbacv1.PolicyRule {
  	return nodePolicyRules
  }
  
@@ -572,7 +572,7 @@ index 947d043de46..0332c5295d6 100644
  	monitoringRules := []rbacv1.PolicyRule{
  		rbacv1helpers.NewRule("get").URLs(
  			"/metrics", "/metrics/slis",
-@@ -630,7 +630,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
+@@ -652,7 +652,7 @@ func ClusterRoles() []rbacv1.ClusterRole {
  const systemNodeRoleName = "system:node"
  
  // ClusterRoleBindings return default rolebindings to the default roles
@@ -582,13 +582,13 @@ index 947d043de46..0332c5295d6 100644
  		rbacv1helpers.NewClusterBinding("cluster-admin").Groups(user.SystemPrivilegedGroup).BindingOrDie(),
  		rbacv1helpers.NewClusterBinding("system:monitoring").Groups(user.MonitoringGroup).BindingOrDie(),
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
-index c3c941a0b9b..0a4f2363775 100644
+index e00024f4da6..5a7e4c6687a 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/controller-roles.yaml
-@@ -517,6 +517,12 @@ items:
-     - get
+@@ -520,6 +520,12 @@ items:
      - list
      - update
+     - watch
 +  - apiGroups:
 +    - discovery.k8s.io
 +    resources:
@@ -598,10 +598,10 @@ index c3c941a0b9b..0a4f2363775 100644
    - apiGroups:
      - ""
      - events.k8s.io
-@@ -567,6 +573,12 @@ items:
-     - get
+@@ -571,6 +577,12 @@ items:
      - list
      - update
+     - watch
 +  - apiGroups:
 +    - discovery.k8s.io
 +    resources:
@@ -625,5 +625,5 @@ literal 0
 HcmV?d00001
 
 -- 
-2.47.1
+2.49.0
 

@@ -1,4 +1,4 @@
-From b21b4a4654d6a45963ee992805af5fe89fafc66f Mon Sep 17 00:00:00 2001
+From 84157b4062ab04c597ed1fc1ec6c089b17184005 Mon Sep 17 00:00:00 2001
 From: Peter Hunt~ <pehunt@redhat.com>
 Date: Mon, 20 Mar 2023 11:43:25 -0400
 Subject: [PATCH] UPSTREAM: <carry>: disable load balancing on created cgroups
@@ -51,18 +51,18 @@ Signed-off-by: Peter Hunt <pehunt@redhat.com>
  6 files changed, 40 insertions(+), 1 deletion(-)
 
 diff --git a/pkg/kubelet/cm/cgroup_manager_linux.go b/pkg/kubelet/cm/cgroup_manager_linux.go
-index 6bcb1298c15..3da3b2ddb0d 100644
+index 9b975a363ed..8bec4833aa5 100644
 --- a/pkg/kubelet/cm/cgroup_manager_linux.go
 +++ b/pkg/kubelet/cm/cgroup_manager_linux.go
-@@ -25,6 +25,7 @@ import (
- 	"sync"
- 	"time"
- 
+@@ -29,6 +29,7 @@ import (
+ 	"github.com/opencontainers/cgroups/fscommon"
+ 	libcontainercgroupmanager "github.com/opencontainers/cgroups/manager"
+ 	cgroupsystemd "github.com/opencontainers/cgroups/systemd"
 +	"github.com/opencontainers/runc/libcontainer/cgroups"
- 	libcontainercgroups "github.com/opencontainers/runc/libcontainer/cgroups"
- 	"github.com/opencontainers/runc/libcontainer/cgroups/fscommon"
- 	libcontainercgroupmanager "github.com/opencontainers/runc/libcontainer/cgroups/manager"
-@@ -146,6 +147,10 @@ type cgroupCommon struct {
+ 	"k8s.io/klog/v2"
+ 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+ 
+@@ -145,6 +146,10 @@ type cgroupCommon struct {
  
  	// useSystemd tells if systemd cgroup manager should be used.
  	useSystemd bool
@@ -73,7 +73,7 @@ index 6bcb1298c15..3da3b2ddb0d 100644
  }
  
  // Make sure that cgroupV1impl and cgroupV2impl implement the CgroupManager interface
-@@ -390,6 +395,25 @@ func (m *cgroupCommon) Create(cgroupConfig *CgroupConfig) error {
+@@ -389,6 +394,25 @@ func (m *cgroupCommon) Create(cgroupConfig *CgroupConfig) error {
  		return err
  	}
  
@@ -99,7 +99,7 @@ index 6bcb1298c15..3da3b2ddb0d 100644
  	// Apply(-1) is a hack to create the cgroup directories for each resource
  	// subsystem. The function [cgroups.Manager.apply()] applies cgroup
  	// configuration to the process with the specified pid.
-@@ -405,7 +429,6 @@ func (m *cgroupCommon) Create(cgroupConfig *CgroupConfig) error {
+@@ -404,7 +428,6 @@ func (m *cgroupCommon) Create(cgroupConfig *CgroupConfig) error {
  	if err := manager.Set(libcontainerCgroupConfig.Resources); err != nil {
  		utilruntime.HandleError(fmt.Errorf("cgroup manager.Set failed: %w", err))
  	}
@@ -122,7 +122,7 @@ index a98ea0c9b5f..986054121b4 100644
  
  func NewCgroupName(base CgroupName, components ...string) CgroupName {
 diff --git a/pkg/kubelet/cm/cgroup_v1_manager_linux.go b/pkg/kubelet/cm/cgroup_v1_manager_linux.go
-index afd02925833..9f35ebd7fd1 100644
+index fac37b6e730..837013fa2d5 100644
 --- a/pkg/kubelet/cm/cgroup_v1_manager_linux.go
 +++ b/pkg/kubelet/cm/cgroup_v1_manager_linux.go
 @@ -143,3 +143,7 @@ func (c *cgroupV1impl) getCgroupCPUConfig(cgroupPath string) (*ResourceConfig, e
@@ -134,10 +134,10 @@ index afd02925833..9f35ebd7fd1 100644
 +	m.cpuLoadBalanceDisable = true
 +}
 diff --git a/pkg/kubelet/cm/cgroup_v2_manager_linux.go b/pkg/kubelet/cm/cgroup_v2_manager_linux.go
-index ad93e971fef..d19667217d8 100644
+index 84f7b01c591..97ada018335 100644
 --- a/pkg/kubelet/cm/cgroup_v2_manager_linux.go
 +++ b/pkg/kubelet/cm/cgroup_v2_manager_linux.go
-@@ -175,3 +175,7 @@ func cpuSharesToCPUWeight(cpuShares uint64) uint64 {
+@@ -179,3 +179,7 @@ func cpuSharesToCPUWeight(cpuShares uint64) uint64 {
  func cpuWeightToCPUShares(cpuWeight uint64) uint64 {
  	return uint64((((cpuWeight - 1) * 262142) / 9999) + 2)
  }
@@ -146,10 +146,10 @@ index ad93e971fef..d19667217d8 100644
 +	m.cpuLoadBalanceDisable = true
 +}
 diff --git a/pkg/kubelet/cm/container_manager_linux.go b/pkg/kubelet/cm/container_manager_linux.go
-index efbd90c1d5f..27ef6a302a1 100644
+index 51536010663..c68ca00276d 100644
 --- a/pkg/kubelet/cm/container_manager_linux.go
 +++ b/pkg/kubelet/cm/container_manager_linux.go
-@@ -251,6 +251,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
+@@ -250,6 +250,9 @@ func NewContainerManager(mountUtil mount.Interface, cadvisorInterface cadvisor.I
  	cgroupRoot := ParseCgroupfsToCgroupName(nodeConfig.CgroupRoot)
  	cgroupManager := NewCgroupManager(subsystems, nodeConfig.CgroupDriver)
  	nodeConfig.CgroupVersion = cgroupManager.Version()
@@ -173,5 +173,5 @@ index e6338d3af81..40195e9cd1d 100644
  
  // QOSContainersInfo stores the names of containers per qos
 -- 
-2.47.1
+2.49.0
 

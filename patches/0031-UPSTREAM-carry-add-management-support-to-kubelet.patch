@@ -1,4 +1,4 @@
-From b1b58a46240f63009b3ecaa4ff1c4c5c5f5c300b Mon Sep 17 00:00:00 2001
+From dd3cf9523253e072080fe6caa89869f6db3c3b8c Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Mon, 29 Mar 2021 12:02:13 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add management support to kubelet
@@ -50,7 +50,7 @@ Signed-off-by: ehila <ehila@redhat.com>
 ---
  pkg/kubelet/cm/cpumanager/cpu_manager.go      |   6 +
  pkg/kubelet/cm/cpumanager/policy_static.go    |  22 +-
- .../cm/cpumanager/policy_static_test.go       |  49 +-
+ .../cm/cpumanager/policy_static_test.go       |  51 +-
  pkg/kubelet/cm/qos_container_manager_linux.go |   4 +
  pkg/kubelet/config/file.go                    |  11 +
  pkg/kubelet/kubelet.go                        |   5 +
@@ -58,13 +58,13 @@ Signed-off-by: ehila <ehila@redhat.com>
  pkg/kubelet/managed/cpu_shares.go             |  30 +
  pkg/kubelet/managed/managed.go                | 204 ++++++
  pkg/kubelet/managed/managed_test.go           | 675 ++++++++++++++++++
- 10 files changed, 1017 insertions(+), 16 deletions(-)
+ 10 files changed, 1018 insertions(+), 17 deletions(-)
  create mode 100644 pkg/kubelet/managed/cpu_shares.go
  create mode 100644 pkg/kubelet/managed/managed.go
  create mode 100644 pkg/kubelet/managed/managed_test.go
 
 diff --git a/pkg/kubelet/cm/cpumanager/cpu_manager.go b/pkg/kubelet/cm/cpumanager/cpu_manager.go
-index 9e72a7cc97a..6b1a34165b5 100644
+index 8b59ba67121..d4a10145d5b 100644
 --- a/pkg/kubelet/cm/cpumanager/cpu_manager.go
 +++ b/pkg/kubelet/cm/cpumanager/cpu_manager.go
 @@ -35,6 +35,7 @@ import (
@@ -75,7 +75,7 @@ index 9e72a7cc97a..6b1a34165b5 100644
  	"k8s.io/kubernetes/pkg/kubelet/status"
  	"k8s.io/utils/cpuset"
  )
-@@ -409,6 +410,7 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
+@@ -411,6 +412,7 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
  	failure = []reconciledContainer{}
  
  	m.removeStaleState()
@@ -83,7 +83,7 @@ index 9e72a7cc97a..6b1a34165b5 100644
  	for _, pod := range m.activePods() {
  		pstatus, ok := m.podStatusProvider.GetPodStatus(pod.UID)
  		if !ok {
-@@ -416,6 +418,10 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
+@@ -418,6 +420,10 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
  			failure = append(failure, reconciledContainer{pod.Name, "", ""})
  			continue
  		}
@@ -95,7 +95,7 @@ index 9e72a7cc97a..6b1a34165b5 100644
  		allContainers := pod.Spec.InitContainers
  		allContainers = append(allContainers, pod.Spec.Containers...)
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static.go b/pkg/kubelet/cm/cpumanager/policy_static.go
-index 26d1fc6d91b..eba1e454f6f 100644
+index a9828474d64..05692761edf 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static.go
 @@ -29,6 +29,7 @@ import (
@@ -150,7 +150,7 @@ index 26d1fc6d91b..eba1e454f6f 100644
  
  	return nil
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static_test.go b/pkg/kubelet/cm/cpumanager/policy_static_test.go
-index 9e9618873cd..87983038f91 100644
+index 73003a2a5c4..59bd2e04f05 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static_test.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static_test.go
 @@ -21,6 +21,8 @@ import (
@@ -160,9 +160,9 @@ index 9e9618873cd..87983038f91 100644
 +	"k8s.io/kubernetes/pkg/kubelet/managed"
 +
  	v1 "k8s.io/api/core/v1"
+ 	"k8s.io/apimachinery/pkg/types"
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
- 	featuregatetesting "k8s.io/component-base/featuregate/testing"
-@@ -961,18 +963,19 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
+@@ -983,19 +985,20 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
  // above test cases are without kubelet --reserved-cpus cmd option
  // the following tests are with --reserved-cpus configured
  type staticPolicyTestWithResvList struct {
@@ -178,6 +178,7 @@ index 9e9618873cd..87983038f91 100644
 -	expNewErr        error
 -	expCPUAlloc      bool
 -	expCSet          cpuset.CPUSet
+-	expUncoreCache   cpuset.CPUSet // represents the expected UncoreCacheIDs
 +	description         string
 +	topo                *topology.CPUTopology
 +	numReservedCPUs     int
@@ -190,11 +191,12 @@ index 9e9618873cd..87983038f91 100644
 +	expNewErr           error
 +	expCPUAlloc         bool
 +	expCSet             cpuset.CPUSet
++	expUncoreCache      cpuset.CPUSet // represents the expected UncoreCacheIDs
 +	managementPartition bool
  }
  
  func TestStaticPolicyStartWithResvList(t *testing.T) {
-@@ -1024,9 +1027,31 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
+@@ -1047,9 +1050,31 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
  			stDefaultCPUSet: cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
  			expNewErr:       fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of 0-1 did not equal 1)"),
  		},
@@ -227,7 +229,7 @@ index 9e9618873cd..87983038f91 100644
  			p, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), testCase.cpuPolicyOptions)
  			if !reflect.DeepEqual(err, testCase.expNewErr) {
 diff --git a/pkg/kubelet/cm/qos_container_manager_linux.go b/pkg/kubelet/cm/qos_container_manager_linux.go
-index 0f88e10ff69..499373eba3c 100644
+index aac639c1e65..762ced265b2 100644
 --- a/pkg/kubelet/cm/qos_container_manager_linux.go
 +++ b/pkg/kubelet/cm/qos_container_manager_linux.go
 @@ -35,6 +35,7 @@ import (
@@ -278,10 +280,10 @@ index 79e2af6ed62..d2526ec989d 100644
  	}
  
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index e44d877c8fe..414232775f1 100644
+index 642cf768505..59846206b72 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -95,6 +95,7 @@ import (
+@@ -98,6 +98,7 @@ import (
  	"k8s.io/kubernetes/pkg/kubelet/kuberuntime"
  	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
  	"k8s.io/kubernetes/pkg/kubelet/logs"
@@ -289,7 +291,7 @@ index e44d877c8fe..414232775f1 100644
  	"k8s.io/kubernetes/pkg/kubelet/metrics"
  	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
  	"k8s.io/kubernetes/pkg/kubelet/network/dns"
-@@ -668,6 +669,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
+@@ -703,6 +704,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
  
  	klet.runtimeService = kubeDeps.RemoteRuntimeService
  
@@ -301,10 +303,10 @@ index e44d877c8fe..414232775f1 100644
  		klet.runtimeClassManager = runtimeclass.NewManager(kubeDeps.KubeClient)
  	}
 diff --git a/pkg/kubelet/kubelet_node_status.go b/pkg/kubelet/kubelet_node_status.go
-index 0505821a75b..6d7156070b6 100644
+index ebe36617f05..94529e9addb 100644
 --- a/pkg/kubelet/kubelet_node_status.go
 +++ b/pkg/kubelet/kubelet_node_status.go
-@@ -42,7 +42,9 @@ import (
+@@ -41,7 +41,9 @@ import (
  	kubeletapis "k8s.io/kubelet/pkg/apis"
  	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
  	"k8s.io/kubernetes/pkg/features"
@@ -314,7 +316,7 @@ index 0505821a75b..6d7156070b6 100644
  	"k8s.io/kubernetes/pkg/kubelet/nodestatus"
  	taintutil "k8s.io/kubernetes/pkg/util/taints"
  	volutil "k8s.io/kubernetes/pkg/volume/util"
-@@ -131,6 +133,9 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
+@@ -130,6 +132,9 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
  	requiresUpdate = kl.updateDefaultLabels(node, existingNode) || requiresUpdate
  	requiresUpdate = kl.reconcileExtendedResource(node, existingNode) || requiresUpdate
  	requiresUpdate = kl.reconcileHugePageResource(node, existingNode) || requiresUpdate
@@ -324,7 +326,7 @@ index 0505821a75b..6d7156070b6 100644
  	if requiresUpdate {
  		if _, _, err := nodeutil.PatchNodeStatus(kl.kubeClient.CoreV1(), types.NodeName(kl.nodeName), originalNode, existingNode); err != nil {
  			klog.ErrorS(err, "Unable to reconcile node with API server,error updating node", "node", klog.KObj(node))
-@@ -141,6 +146,25 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
+@@ -140,6 +145,25 @@ func (kl *Kubelet) tryRegisterWithAPIServer(node *v1.Node) bool {
  	return true
  }
  
@@ -350,7 +352,7 @@ index 0505821a75b..6d7156070b6 100644
  // reconcileHugePageResource will update huge page capacity for each page size and remove huge page sizes no longer supported
  func (kl *Kubelet) reconcileHugePageResource(initialNode, existingNode *v1.Node) bool {
  	requiresUpdate := updateDefaultResources(initialNode, existingNode)
-@@ -432,6 +456,9 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
+@@ -431,6 +455,9 @@ func (kl *Kubelet) initialNode(ctx context.Context) (*v1.Node, error) {
  			}
  		}
  	}
@@ -1288,5 +1290,5 @@ index 00000000000..16acda0868c
 +	return pod
 +}
 -- 
-2.47.1
+2.49.0
 

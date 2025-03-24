@@ -1,4 +1,4 @@
-From 1b4b356224d8fc17f47a7f7c48b87f7b223968e3 Mon Sep 17 00:00:00 2001
+From b1920d5bfefa7a025f401fdb401c4fc4a4812352 Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Wed, 17 Aug 2022 09:17:22 -0400
 Subject: [PATCH] UPSTREAM: <carry>: optionally enable retry after until
@@ -9,16 +9,16 @@ OpenShift-Rebase-Source: fc3523f8e3a
  .../src/k8s.io/apiserver/pkg/server/config.go |  16 ++
  .../server/filters/with_not_ready_patch.go    |  92 +++++++++++
  .../filters/with_not_ready_patch_test.go      | 143 ++++++++++++++++++
- .../pkg/server/options/server_run_options.go  |  21 +++
- 4 files changed, 272 insertions(+)
+ .../pkg/server/options/server_run_options.go  |  22 ++-
+ 4 files changed, 272 insertions(+), 1 deletion(-)
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/with_not_ready_patch.go
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/filters/with_not_ready_patch_test.go
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index 007b6185b0b..03d4b711d9a 100644
+index 667e2343524..0b964aceb75 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -321,6 +321,18 @@ type Config struct {
+@@ -330,6 +330,18 @@ type Config struct {
  	// This grace period is orthogonal to other grace periods, and
  	// it is not overridden by any other grace period.
  	ShutdownWatchTerminationGracePeriod time.Duration
@@ -37,7 +37,7 @@ index 007b6185b0b..03d4b711d9a 100644
  }
  
  type RecommendedConfig struct {
-@@ -1061,6 +1073,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1070,6 +1082,10 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  		handler = genericfilters.WithMaxInFlightLimit(handler, c.MaxRequestsInFlight, c.MaxMutatingRequestsInFlight, c.LongRunningFunc)
  	}
  
@@ -296,13 +296,13 @@ index 00000000000..f5d1b5c6111
 +	}
 +}
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go b/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
-index a4d31ef926e..ce2834924de 100644
+index a1bf4fa932e..316465b9cba 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/options/server_run_options.go
-@@ -98,6 +98,18 @@ type ServerRunOptions struct {
- 	ComponentGlobalsRegistry featuregate.ComponentGlobalsRegistry
- 	// ComponentName is name under which the server's global variabled are registered in the ComponentGlobalsRegistry.
- 	ComponentName string
+@@ -107,6 +107,18 @@ type ServerRunOptions struct {
+ 	// If true, APIs identified by group/version that are enabled in the --runtime-config flag will be installed even if it is introduced after the emulation version. --runtime-config flag values that identify multiple APIs, such as api/all,api/ga,api/beta, are not influenced by this flag and will only enable APIs available at the current emulation version.
+ 	// If false, error would be thrown if any GroupVersion or GroupVersionResource explicitly enabled in the --runtime-config flag is introduced after the emulation version.
+ 	RuntimeConfigEmulationForwardCompatible bool
 +
 +	// SendRetryAfterWhileNotReadyOnce, if enabled, the apiserver will
 +	// reject all incoming requests with a 503 status code and a
@@ -318,7 +318,7 @@ index a4d31ef926e..ce2834924de 100644
  }
  
  func NewServerRunOptions() *ServerRunOptions {
-@@ -126,6 +138,7 @@ func NewServerRunOptionsForComponent(componentName string, componentGlobalsRegis
+@@ -135,6 +147,7 @@ func NewServerRunOptionsForComponent(componentName string, componentGlobalsRegis
  		ShutdownSendRetryAfter:              false,
  		ComponentName:                       componentName,
  		ComponentGlobalsRegistry:            componentGlobalsRegistry,
@@ -326,15 +326,16 @@ index a4d31ef926e..ce2834924de 100644
  	}
  }
  
-@@ -152,6 +165,7 @@ func (s *ServerRunOptions) ApplyTo(c *server.Config) error {
- 	c.ShutdownWatchTerminationGracePeriod = s.ShutdownWatchTerminationGracePeriod
- 	c.EffectiveVersion = s.ComponentGlobalsRegistry.EffectiveVersionFor(s.ComponentName)
+@@ -163,7 +176,7 @@ func (s *ServerRunOptions) ApplyTo(c *server.Config) error {
  	c.FeatureGate = s.ComponentGlobalsRegistry.FeatureGateFor(s.ComponentName)
+ 	c.EmulationForwardCompatible = s.EmulationForwardCompatible
+ 	c.RuntimeConfigEmulationForwardCompatible = s.RuntimeConfigEmulationForwardCompatible
+-
 +	c.SendRetryAfterWhileNotReadyOnce = s.SendRetryAfterWhileNotReadyOnce
- 
  	return nil
  }
-@@ -375,6 +389,13 @@ func (s *ServerRunOptions) AddUniversalFlags(fs *pflag.FlagSet) {
+ 
+@@ -397,6 +410,13 @@ func (s *ServerRunOptions) AddUniversalFlags(fs *pflag.FlagSet) {
  		"This option, if set, represents the maximum amount of grace period the apiserver will wait "+
  		"for active watch request(s) to drain during the graceful server shutdown window.")
  
@@ -346,8 +347,8 @@ index a4d31ef926e..ce2834924de 100644
 +		"This option is applicable to Microshift only, this should never be enabled for OCP")
 +
  	s.ComponentGlobalsRegistry.AddFlags(fs)
- }
- 
+ 	fs.BoolVar(&s.EmulationForwardCompatible, "emulation-forward-compatible", s.EmulationForwardCompatible, ""+
+ 		"If true all APIs that have higher priority than the APIs enabled at the emulation version of the same group resource will be installed. "+
 -- 
-2.47.1
+2.49.0
 

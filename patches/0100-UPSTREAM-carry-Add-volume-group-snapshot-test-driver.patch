@@ -1,0 +1,32 @@
+From 1c595692b93598a4cb59b53602a3d0561b29871a Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 24 Mar 2025 10:56:04 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add volume group snapshot test driver
+
+---
+ test/e2e/storage/drivers/openshift_group_snapshot_driver.go | 2 --
+ 1 file changed, 2 deletions(-)
+
+diff --git a/test/e2e/storage/drivers/openshift_group_snapshot_driver.go b/test/e2e/storage/drivers/openshift_group_snapshot_driver.go
+index cdbbbf5484f..5b4c8218ce2 100644
+--- a/test/e2e/storage/drivers/openshift_group_snapshot_driver.go
++++ b/test/e2e/storage/drivers/openshift_group_snapshot_driver.go
+@@ -177,7 +177,6 @@ func (h *groupSnapshotHostpathCSIDriver) PrepareTest(ctx context.Context, f *fra
+ 	// Create secondary namespace which will be used for creating driver
+ 	driverNamespace := utils.CreateDriverNamespace(ctx, f)
+ 	driverns := driverNamespace.Name
+-	testns := f.Namespace.Name
+ 
+ 	ginkgo.By(fmt.Sprintf("deploying %s driver", h.driverInfo.Name))
+ 	cancelLogging := utils.StartPodLogs(ctx, f, driverNamespace)
+@@ -276,7 +275,6 @@ func (h *groupSnapshotHostpathCSIDriver) PrepareTest(ctx context.Context, f *fra
+ 	cleanupFunc := generateDriverCleanupFunc(
+ 		f,
+ 		h.driverInfo.Name,
+-		testns,
+ 		driverns,
+ 		cancelLogging)
+ 	ginkgo.DeferCleanup(cleanupFunc)
+-- 
+2.49.0
+

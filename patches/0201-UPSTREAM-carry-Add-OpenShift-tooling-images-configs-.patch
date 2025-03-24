@@ -1,0 +1,26 @@
+From e752388260c5fc54061b8fdb7a3a6f2e9834fc8e Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 24 Mar 2025 16:21:30 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
+
+---
+ hack/update-openapi-spec.sh | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/hack/update-openapi-spec.sh b/hack/update-openapi-spec.sh
+index 2738c0a2168..22622f4846f 100755
+--- a/hack/update-openapi-spec.sh
++++ b/hack/update-openapi-spec.sh
+@@ -82,7 +82,7 @@ KUBE_APISERVER_STRICT_REMOVED_API_HANDLING_IN_ALPHA=${KUBE_APISERVER_STRICT_REMO
+   --etcd-servers="http://${ETCD_HOST}:${ETCD_PORT}" \
+   --advertise-address="10.10.10.10" \
+   --cert-dir="${TMP_DIR}/certs" \
+-  --feature-gates=AllAlpha=true,AllBeta=true,OpenAPIEnums=false \
++  --feature-gates=AllAlpha=true,OpenAPIEnums=false \
+   --runtime-config="api/all=true" \
+   --token-auth-file="${TMP_DIR}/tokenauth.csv" \
+   --authorization-mode=RBAC \
+-- 
+2.49.0
+

@@ -1,0 +1,310 @@
+From 352692f27bde75e0065153fae7fee7b843b729c1 Mon Sep 17 00:00:00 2001
+From: Peter Hunt <pehunt@redhat.com>
+Date: Mon, 25 Nov 2024 11:44:55 -0500
+Subject: [PATCH] UPSTREAM: <carry>: authorizer: move mininum kubelet version
+ authorizer to pkg/kubeapiserver and add authorization mode
+
+this does require a line of code be moved from the enablement package to stop a cyclical import
+
+Signed-off-by: Peter Hunt <pehunt@redhat.com>
+---
+ cmd/kube-apiserver/app/config.go              | 15 ------
+ .../minimum_kubelet_version.go                | 40 ++++++++--------
+ .../minimum_kubelet_version_test.go           |  6 +--
+ .../enablement/intialization.go               |  5 ++
+ pkg/kubeapiserver/authorizer/modes/patch.go   |  3 +-
+ pkg/kubeapiserver/authorizer/patch.go         | 46 +++++++++++++++++++
+ pkg/kubeapiserver/authorizer/reload.go        | 11 +++++
+ 7 files changed, 87 insertions(+), 39 deletions(-)
+
+diff --git a/cmd/kube-apiserver/app/config.go b/cmd/kube-apiserver/app/config.go
+index f1272dbdcf7..7f03d42f9d8 100644
+--- a/cmd/kube-apiserver/app/config.go
++++ b/cmd/kube-apiserver/app/config.go
+@@ -23,12 +23,8 @@ import (
+ 	aggregatorapiserver "k8s.io/kube-aggregator/pkg/apiserver"
+ 	aggregatorscheme "k8s.io/kube-aggregator/pkg/apiserver/scheme"
+ 
+-	"k8s.io/apiserver/pkg/authorization/union"
+ 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
+-	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/minimumkubeletversion"
+-	"k8s.io/kubernetes/openshift-kube-apiserver/enablement"
+ 	"k8s.io/kubernetes/pkg/api/legacyscheme"
+-	"k8s.io/kubernetes/pkg/auth/nodeidentifier"
+ 	"k8s.io/kubernetes/pkg/controlplane"
+ 	controlplaneapiserver "k8s.io/kubernetes/pkg/controlplane/apiserver"
+ 	generatedopenapi "k8s.io/kubernetes/pkg/generated/openapi"
+@@ -90,17 +86,6 @@ func NewConfig(opts options.CompletedOptions) (*Config, error) {
+ 		return nil, err
+ 	}
+ 
+-	if ocfg := enablement.OpenshiftConfig(); ocfg != nil {
+-		// Add MinimumKubeletVerison authorizer, to block a node from being able to access most resources if it's not new enough.
+-		// We must do so here instead of in pkg/apiserver because it relies on a node informer, which is not present in generic control planes.
+-		genericConfig.Authorization.Authorizer = union.New(genericConfig.Authorization.Authorizer, minimumkubeletversion.NewMinimumKubeletVersion(
+-			ocfg.MinimumKubeletVersion,
+-			nodeidentifier.NewDefaultNodeIdentifier(),
+-			versionedInformers.Core().V1().Nodes().Informer(),
+-			versionedInformers.Core().V1().Nodes().Lister(),
+-		))
+-	}
+-
+ 	kubeAPIs, serviceResolver, pluginInitializer, err := CreateKubeAPIServerConfig(opts, genericConfig, versionedInformers, storageFactory)
+ 	if err != nil {
+ 		return nil, err
+diff --git a/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version.go b/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version.go
+index 56218410b0e..f28ff0e7287 100644
+--- a/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version.go
++++ b/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version.go
+@@ -2,15 +2,19 @@ package minimumkubeletversion
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"fmt"
+ 
+ 	"github.com/blang/semver/v4"
++	openshiftfeatures "github.com/openshift/api/features"
+ 	nodelib "github.com/openshift/library-go/pkg/apiserver/node"
+ 	authorizationv1 "k8s.io/api/authorization/v1"
+ 	"k8s.io/apimachinery/pkg/runtime/schema"
+ 	"k8s.io/apiserver/pkg/authorization/authorizer"
++	"k8s.io/apiserver/pkg/util/feature"
+ 	v1listers "k8s.io/client-go/listers/core/v1"
+ 	cache "k8s.io/client-go/tools/cache"
++	"k8s.io/component-base/featuregate"
+ 	api "k8s.io/kubernetes/pkg/apis/core"
+ 	"k8s.io/kubernetes/pkg/auth/nodeidentifier"
+ )
+@@ -24,22 +28,20 @@ type minimumKubeletVersionAuth struct {
+ 
+ // Creates a new minimumKubeletVersionAuth object, which is an authorizer that checks
+ // whether nodes are new enough to be authorized.
+-func NewMinimumKubeletVersion(minVersionStr string,
++func NewMinimumKubeletVersion(minVersion *semver.Version,
+ 	nodeIdentifier nodeidentifier.NodeIdentifier,
+ 	nodeInformer cache.SharedIndexInformer,
+ 	nodeLister v1listers.NodeLister,
+ ) *minimumKubeletVersionAuth {
+-	var minVersionPtr *semver.Version
+-	if len(minVersionStr) != 0 {
+-		v := semver.MustParse(minVersionStr)
+-		minVersionPtr = &v
++	if !feature.DefaultFeatureGate.Enabled(featuregate.Feature(openshiftfeatures.FeatureGateMinimumKubeletVersion)) {
++		minVersion = nil
+ 	}
+ 
+ 	return &minimumKubeletVersionAuth{
+ 		nodeIdentifier:          nodeIdentifier,
+ 		nodeLister:              nodeLister,
+ 		hasNodeInformerSyncedFn: nodeInformer.HasSynced,
+-		minVersion:              minVersionPtr,
++		minVersion:              minVersion,
+ 	}
+ }
+ 
+@@ -48,16 +50,6 @@ func (m *minimumKubeletVersionAuth) Authorize(ctx context.Context, attrs authori
+ 		return authorizer.DecisionNoOpinion, "", nil
+ 	}
+ 
+-	nodeName, isNode := m.nodeIdentifier.NodeIdentity(attrs.GetUser())
+-	if !isNode {
+-		// ignore requests from non-nodes
+-		return authorizer.DecisionNoOpinion, "", nil
+-	}
+-
+-	if len(nodeName) == 0 {
+-		return authorizer.DecisionNoOpinion, fmt.Sprintf("unknown node for user %q", attrs.GetUser().GetName()), nil
+-	}
+-
+ 	// Short-circut if "subjectaccessreviews", or a "get" or "update" on the node object.
+ 	// Regardless of kubelet version, it should be allowed to do these things.
+ 	if attrs.IsResourceRequest() {
+@@ -67,23 +59,31 @@ func (m *minimumKubeletVersionAuth) Authorize(ctx context.Context, attrs authori
+ 			if v := attrs.GetVerb(); v == "get" || v == "update" {
+ 				return authorizer.DecisionNoOpinion, "", nil
+ 			}
+-		// TODO(haircommander): do we need other flavors of access reviews here?
+ 		case authorizationv1.Resource("subjectaccessreviews"):
+ 			return authorizer.DecisionNoOpinion, "", nil
+ 		}
+ 	}
+ 
++	nodeName, isNode := m.nodeIdentifier.NodeIdentity(attrs.GetUser())
++	if !isNode {
++		// ignore requests from non-nodes
++		return authorizer.DecisionNoOpinion, "", nil
++	}
++
+ 	if !m.hasNodeInformerSyncedFn() {
+-		return authorizer.DecisionNoOpinion, fmt.Sprintf("node informer not synced, cannot check if node %s is new enough", nodeName), nil
++		return authorizer.DecisionDeny, "", fmt.Errorf("node informer not synced, cannot check if node %s is new enough", nodeName)
+ 	}
+ 
+ 	node, err := m.nodeLister.Get(nodeName)
+ 	if err != nil {
+-		return authorizer.DecisionNoOpinion, fmt.Sprintf("failed to get node %s: %v", nodeName, err), nil
++		return authorizer.DecisionDeny, "", err
+ 	}
+ 
+ 	if err := nodelib.IsNodeTooOld(node, m.minVersion); err != nil {
+-		return authorizer.DecisionDeny, err.Error(), nil
++		if errors.Is(err, nodelib.ErrKubeletOutdated) {
++			return authorizer.DecisionDeny, err.Error(), nil
++		}
++		return authorizer.DecisionDeny, "", err
+ 	}
+ 
+ 	return authorizer.DecisionNoOpinion, "", nil
+diff --git a/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version_test.go b/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version_test.go
+index 43c8e00cd29..a43321e67e1 100644
+--- a/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version_test.go
++++ b/openshift-kube-apiserver/authorization/minimumkubeletversion/minimum_kubelet_version_test.go
+@@ -94,8 +94,8 @@ func TestAuthorize(t *testing.T) {
+ 				Namespace:       "ns",
+ 				User:            nodeUser,
+ 			},
+-			expectedAllowed: kauthorizer.DecisionNoOpinion,
+-			expectedMsg:     `failed to get node node0: node "node0" not found`,
++			expectedAllowed: kauthorizer.DecisionDeny,
++			expectedErr:     `node "node0" not found`,
+ 			node:            &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+ 		},
+ 		{
+@@ -107,7 +107,7 @@ func TestAuthorize(t *testing.T) {
+ 				User:            nodeUser,
+ 			},
+ 			expectedAllowed: kauthorizer.DecisionDeny,
+-			expectedMsg:     `failed to parse node version bogus: No Major.Minor.Patch elements found`,
++			expectedErr:     `failed to parse node version bogus: No Major.Minor.Patch elements found`,
+ 			node: &v1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node0"},
+ 				Status: v1.NodeStatus{
+ 					NodeInfo: v1.NodeSystemInfo{
+diff --git a/openshift-kube-apiserver/enablement/intialization.go b/openshift-kube-apiserver/enablement/intialization.go
+index 52794bec4b6..3aff4daf24c 100644
+--- a/openshift-kube-apiserver/enablement/intialization.go
++++ b/openshift-kube-apiserver/enablement/intialization.go
+@@ -87,6 +87,11 @@ func ForceGlobalInitializationForOpenShift() {
+ 	// we need to have the authorization chain place something before system:masters
+ 	// SkipSystemMastersAuthorizer disable implicitly added system/master authz, and turn it into another authz mode "SystemMasters", to be added via authorization-mode
+ 	authorizer.SkipSystemMastersAuthorizer()
++
++	// Set the minimum kubelet version
++	// If the OpenshiftConfig wasn't configured by this point, it's a programming error,
++	// and this should panic.
++	authorizer.SetMinimumKubeletVersion(OpenshiftConfig().MinimumKubeletVersion)
+ }
+ 
+ var SCCAdmissionPlugin = sccadmission.NewConstraint()
+diff --git a/pkg/kubeapiserver/authorizer/modes/patch.go b/pkg/kubeapiserver/authorizer/modes/patch.go
+index bc892601ebe..830982e5b71 100644
+--- a/pkg/kubeapiserver/authorizer/modes/patch.go
++++ b/pkg/kubeapiserver/authorizer/modes/patch.go
+@@ -2,7 +2,8 @@ package modes
+ 
+ var ModeScope = "Scope"
+ var ModeSystemMasters = "SystemMasters"
++var ModeMinimumKubeletVersion = "MinimumKubeletVersion"
+ 
+ func init() {
+-	AuthorizationModeChoices = append(AuthorizationModeChoices, ModeScope, ModeSystemMasters)
++	AuthorizationModeChoices = append(AuthorizationModeChoices, ModeScope, ModeSystemMasters, ModeMinimumKubeletVersion)
+ }
+diff --git a/pkg/kubeapiserver/authorizer/patch.go b/pkg/kubeapiserver/authorizer/patch.go
+index 8a095efcf98..7d44be99648 100644
+--- a/pkg/kubeapiserver/authorizer/patch.go
++++ b/pkg/kubeapiserver/authorizer/patch.go
+@@ -1,8 +1,54 @@
+ package authorizer
+ 
++import (
++	"sync"
++
++	"github.com/blang/semver/v4"
++)
++
+ var skipSystemMastersAuthorizer = false
+ 
+ // SkipSystemMastersAuthorizer disable implicitly added system/master authz, and turn it into another authz mode "SystemMasters", to be added via authorization-mode
+ func SkipSystemMastersAuthorizer() {
+ 	skipSystemMastersAuthorizer = true
+ }
++
++var (
++	minimumKubeletVersion *semver.Version
++	versionLock           sync.Mutex
++	versionSet            bool
++)
++
++// GetMinimumKubeletVersion retrieves the set global minimum kubelet version in a safe way.
++// It ensures it is only retrieved once, and is set before it's retrieved.
++// The global value should only be gotten through this function.
++// It is valid for the version to be unset. It will be treated the same as explicitly setting version to "".
++// This function (and the corresponding functions/variables) are added to avoid a import cycle between the
++// ./openshift-kube-apiserver/enablement and ./pkg/kubeapiserver/authorizer packages
++func GetMinimumKubeletVersion() *semver.Version {
++	versionLock.Lock()
++	defer versionLock.Unlock()
++	if !versionSet {
++		panic("coding error: MinimumKubeletVersion not set yet")
++	}
++	return minimumKubeletVersion
++}
++
++// SetMinimumKubeletVersion sets the global minimum kubelet version in a safe way.
++// It ensures it is only set once, and the passed version is valid.
++// If will panic on any error.
++// The global value should only be set through this function.
++// Passing an empty string for version is valid, and means there is no minimum version.
++func SetMinimumKubeletVersion(version string) {
++	versionLock.Lock()
++	defer versionLock.Unlock()
++	if versionSet {
++		panic("coding error: MinimumKubeletVersion already set")
++	}
++	versionSet = true
++	if len(version) == 0 {
++		return
++	}
++	v := semver.MustParse(version)
++	minimumKubeletVersion = &v
++}
+diff --git a/pkg/kubeapiserver/authorizer/reload.go b/pkg/kubeapiserver/authorizer/reload.go
+index 381765d81c3..3de2fff36a8 100644
+--- a/pkg/kubeapiserver/authorizer/reload.go
++++ b/pkg/kubeapiserver/authorizer/reload.go
+@@ -28,6 +28,7 @@ import (
+ 	"time"
+ 
+ 	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/browsersafe"
++	"k8s.io/kubernetes/openshift-kube-apiserver/authorization/minimumkubeletversion"
+ 
+ 	"k8s.io/apimachinery/pkg/util/sets"
+ 	authzconfig "k8s.io/apiserver/pkg/apis/apiserver"
+@@ -43,6 +44,7 @@ import (
+ 	webhookmetrics "k8s.io/apiserver/plugin/pkg/authorizer/webhook/metrics"
+ 	"k8s.io/klog/v2"
+ 	"k8s.io/kubernetes/pkg/auth/authorizer/abac"
++	"k8s.io/kubernetes/pkg/auth/nodeidentifier"
+ 	"k8s.io/kubernetes/pkg/kubeapiserver/authorizer/modes"
+ 	"k8s.io/kubernetes/pkg/util/filesystem"
+ 	"k8s.io/kubernetes/plugin/pkg/auth/authorizer/node"
+@@ -175,6 +177,15 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
+ 		case authzconfig.AuthorizerType(modes.ModeSystemMasters):
+ 			// no browsersafeauthorizer here becase that rewrites the resources.  This authorizer matches no matter which resource matches.
+ 			authorizers = append(authorizers, authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup))
++		case authzconfig.AuthorizerType(modes.ModeMinimumKubeletVersion):
++			// Add MinimumKubeletVerison authorizer, to block a node from being able to access most resources if it's not new enough.
++			// We must do so here instead of in pkg/apiserver because it relies on a node informer, which is not present in generic control planes.
++			authorizers = append(authorizers, minimumkubeletversion.NewMinimumKubeletVersion(
++				GetMinimumKubeletVersion(),
++				nodeidentifier.NewDefaultNodeIdentifier(),
++				r.initialConfig.VersionedInformerFactory.Core().V1().Nodes().Informer(),
++				r.initialConfig.VersionedInformerFactory.Core().V1().Nodes().Lister(),
++			))
+ 		default:
+ 			return nil, nil, fmt.Errorf("unknown authorization mode %s specified", configuredAuthorizer.Type)
+ 		}
+-- 
+2.49.0
+

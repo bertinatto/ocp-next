@@ -1,4 +1,4 @@
-From 2050f5c9a4d131d6d2d615da1e7d60a8a20e3a88 Mon Sep 17 00:00:00 2001
+From bf6b85530c07b61025baebe461d0bca913f55153 Mon Sep 17 00:00:00 2001
 From: Swarup Ghosh <swghosh@redhat.com>
 Date: Fri, 15 Mar 2024 18:41:09 +0530
 Subject: [PATCH] UPSTREAM: <carry>: Add openshift feature gates to
@@ -12,15 +12,15 @@ Signed-off-by: Swarup Ghosh <swghosh@redhat.com>
  create mode 100644 pkg/features/openshift_features.go
 
 diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index f9838d90796..ebb471c98d5 100644
+index 760636d7e4c..8ed56b6a96b 100644
 --- a/pkg/features/kube_features.go
 +++ b/pkg/features/kube_features.go
-@@ -871,6 +871,7 @@ const (
+@@ -934,6 +934,7 @@ const (
  )
  
  func init() {
 +	registerOpenshiftFeatures()
- 	runtime.Must(utilfeature.DefaultMutableFeatureGate.Add(defaultKubernetesFeatureGates))
+ 	runtime.Must(utilfeature.DefaultMutableFeatureGate.Add(defaultKubernetesFeatureGates)) //nolint:forbidigo // TODO(https://github.com/kubernetes/enhancements/tree/master/keps/sig-architecture/4330-compatibility-versions): Remove this once we complete the migration to versioned feature gates
  	runtime.Must(utilfeature.DefaultMutableFeatureGate.AddVersioned(defaultVersionedKubernetesFeatureGates))
  	runtime.Must(zpagesfeatures.AddFeatureGates(utilfeature.DefaultMutableFeatureGate))
 diff --git a/pkg/features/openshift_features.go b/pkg/features/openshift_features.go
@@ -45,5 +45,5 @@ index 00000000000..6325606ee88
 +	}
 +}
 -- 
-2.47.1
+2.49.0
 

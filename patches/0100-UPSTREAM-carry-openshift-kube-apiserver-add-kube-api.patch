@@ -1,0 +1,26 @@
+From 70f1ee2c1d11417746384313a822a06741eaacf1 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 24 Mar 2025 11:08:32 -0300
+Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
+ kube-apiserver patches
+
+---
+ cmd/kube-apiserver/app/server.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/cmd/kube-apiserver/app/server.go b/cmd/kube-apiserver/app/server.go
+index e27126246a2..75edc5926c8 100644
+--- a/cmd/kube-apiserver/app/server.go
++++ b/cmd/kube-apiserver/app/server.go
+@@ -121,7 +121,7 @@ cluster's shared state through which all other components interact.`,
+ 					return err
+ 				}
+ 				// initialize feature gates again with the new flags
+-				if err := featuregate.DefaultComponentGlobalsRegistry.Set(); err != nil {
++				if err := s.GenericServerRunOptions.ComponentGlobalsRegistry.Set(); err != nil {
+ 					return err
+ 				}
+ 
+-- 
+2.49.0
+

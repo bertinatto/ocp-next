@@ -1,4 +1,4 @@
-From 1bd83fd3a9829c9477dcc576224e37dae3491ea7 Mon Sep 17 00:00:00 2001
+From 66961f04f47d0236718f86b23e6efab303897810 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: allow running
@@ -32,10 +32,10 @@ The `foregroundDeletion` finalizer was set on these CRD objects which
 blocks deletion indifinetelly as GC will ignore these resources.
 ---
  cmd/kube-controller-manager/app/apps.go       |   5 +-
- .../app/config/config.go                      |   2 +
+ .../app/config/config.go                      |   3 +-
  .../app/config/patch.go                       |   9 +
  .../app/controllermanager.go                  |  19 +-
- .../app/options/options.go                    |   6 +
+ .../app/options/options.go                    |   7 +
  cmd/kube-controller-manager/app/patch.go      |  84 +++++
  cmd/kube-controller-manager/app/patch_gc.go   |  37 +++
  .../app/patch_informers_openshift.go          | 293 ++++++++++++++++++
@@ -43,7 +43,7 @@ blocks deletion indifinetelly as GC will ignore these resources.
  pkg/controller/daemon/daemon_controller.go    |  24 +-
  pkg/controller/daemon/patch_nodeselector.go   | 109 +++++++
  .../daemon/patch_nodeselector_test.go         | 186 +++++++++++
- 12 files changed, 850 insertions(+), 11 deletions(-)
+ 12 files changed, 851 insertions(+), 12 deletions(-)
  create mode 100644 cmd/kube-controller-manager/app/config/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch_gc.go
@@ -70,18 +70,19 @@ index 20f9523d050..b1f84a480de 100644
  		controllerContext.InformerFactory.Apps().V1().ControllerRevisions(),
  		controllerContext.InformerFactory.Core().V1().Pods(),
 diff --git a/cmd/kube-controller-manager/app/config/config.go b/cmd/kube-controller-manager/app/config/config.go
-index 3034f288d91..efadc56383b 100644
+index e841d109dd1..2e5b9ec7806 100644
 --- a/cmd/kube-controller-manager/app/config/config.go
 +++ b/cmd/kube-controller-manager/app/config/config.go
-@@ -26,6 +26,8 @@ import (
- 
+@@ -29,7 +29,8 @@ import (
  // Config is the main context object for the controller manager.
  type Config struct {
+ 	// Flagz is the Reader interface to get flags for the flagz page.
+-	Flagz flagz.Reader
++	Flagz            flagz.Reader
 +	OpenShiftContext OpenShiftContext
-+
+ 
  	ComponentConfig kubectrlmgrconfig.KubeControllerManagerConfiguration
  
- 	SecureServing *apiserver.SecureServingInfo
 diff --git a/cmd/kube-controller-manager/app/config/patch.go b/cmd/kube-controller-manager/app/config/patch.go
 new file mode 100644
 index 00000000000..a7112d003d4
@@ -98,10 +99,10 @@ index 00000000000..a7112d003d4
 +	KubeDefaultProjectNodeSelector      string
 +}
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index fc3f899d3a7..4da8c44e333 100644
+index dc847d66e5d..23772819bdf 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
-@@ -137,6 +137,11 @@ controller, and serviceaccounts controller.`,
+@@ -140,6 +140,11 @@ controller, and serviceaccounts controller.`,
  				return err
  			}
  
@@ -111,9 +112,9 @@ index fc3f899d3a7..4da8c44e333 100644
 +			}
 +
  			// add feature enablement metrics
- 			fg := s.ComponentGlobalsRegistry.FeatureGateFor(featuregate.DefaultKubeComponent)
+ 			fg := s.ComponentGlobalsRegistry.FeatureGateFor(basecompatibility.DefaultKubeComponent)
  			fg.(featuregate.MutableFeatureGate).AddMetrics()
-@@ -364,6 +369,8 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
+@@ -376,6 +381,8 @@ func Run(ctx context.Context, c *config.CompletedConfig) error {
  
  // ControllerContext defines the context object for controller
  type ControllerContext struct {
@@ -122,7 +123,7 @@ index fc3f899d3a7..4da8c44e333 100644
  	// ClientBuilder will provide a client for this controller to use
  	ClientBuilder clientbuilder.ControllerClientBuilder
  
-@@ -607,7 +614,12 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
+@@ -619,7 +626,12 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
  	}
  
  	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
@@ -136,7 +137,7 @@ index fc3f899d3a7..4da8c44e333 100644
  
  	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
  	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, ResyncPeriod(s)(), metadatainformer.WithTransform(trim))
-@@ -627,6 +639,7 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
+@@ -639,6 +651,7 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
  	}, 30*time.Second, ctx.Done())
  
  	controllerContext := ControllerContext{
@@ -144,7 +145,7 @@ index fc3f899d3a7..4da8c44e333 100644
  		ClientBuilder:                   clientBuilder,
  		InformerFactory:                 sharedInformers,
  		ObjectOrMetadataInformerFactory: informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
-@@ -808,10 +821,10 @@ func startServiceAccountTokenController(ctx context.Context, controllerContext C
+@@ -821,10 +834,10 @@ func startServiceAccountTokenController(ctx context.Context, controllerContext C
  		controllerContext.InformerFactory.Core().V1().ServiceAccounts(),
  		controllerContext.InformerFactory.Core().V1().Secrets(),
  		rootClientBuilder.ClientOrDie("tokens-controller"),
@@ -158,18 +159,19 @@ index fc3f899d3a7..4da8c44e333 100644
  	if err != nil {
  		return nil, true, fmt.Errorf("error creating Tokens controller: %v", err)
 diff --git a/cmd/kube-controller-manager/app/options/options.go b/cmd/kube-controller-manager/app/options/options.go
-index 7556d946922..3b87a366ff6 100644
+index e21f9b4fdbf..c5cfe0f2501 100644
 --- a/cmd/kube-controller-manager/app/options/options.go
 +++ b/cmd/kube-controller-manager/app/options/options.go
-@@ -107,6 +107,7 @@ type KubeControllerManagerOptions struct {
+@@ -112,6 +112,8 @@ type KubeControllerManagerOptions struct {
  
- 	// ComponentGlobalsRegistry is the registry where the effective versions and feature gates for all components are stored.
- 	ComponentGlobalsRegistry featuregate.ComponentGlobalsRegistry
-+	OpenShiftContext         kubecontrollerconfig.OpenShiftContext
+ 	// Parsedflags holds the parsed CLI flags.
+ 	ParsedFlags *cliflag.NamedFlagSets
++
++	OpenShiftContext kubecontrollerconfig.OpenShiftContext
  }
  
  // NewKubeControllerManagerOptions creates a new KubeControllerManagerOptions with a default config.
-@@ -301,6 +302,8 @@ func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledBy
+@@ -307,6 +309,8 @@ func (s *KubeControllerManagerOptions) Flags(allControllers []string, disabledBy
  	}
  
  	s.ComponentGlobalsRegistry.AddFlags(fss.FlagSet("generic"))
@@ -178,7 +180,7 @@ index 7556d946922..3b87a366ff6 100644
  
  	return fss
  }
-@@ -408,6 +411,9 @@ func (s *KubeControllerManagerOptions) ApplyTo(c *kubecontrollerconfig.Config, a
+@@ -414,6 +418,9 @@ func (s *KubeControllerManagerOptions) ApplyTo(c *kubecontrollerconfig.Config, a
  			return err
  		}
  	}
@@ -1091,5 +1093,5 @@ index 00000000000..6553fe694ea
 +	}
 +}
 -- 
-2.47.1
+2.49.0
 
