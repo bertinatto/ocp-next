@@ -109,7 +109,7 @@ func (g *GitWrapper) Checkout(branch string) error {
 }
 
 func (g *GitWrapper) Clean() error {
-	return g.runGit("clean", "-fd")
+	return g.runGit("clean", "-fdx")
 }
 
 func (g *GitWrapper) Fetch(remote, branch string) error {
