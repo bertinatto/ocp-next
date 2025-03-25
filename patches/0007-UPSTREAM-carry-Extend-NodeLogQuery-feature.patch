@@ -1,4 +1,4 @@
-From 24312c8d1cdf65599afba69abc7a4066a61a5a0e Mon Sep 17 00:00:00 2001
+From ba363a1477f43a3423b6b448c3a2036259e687d9 Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -12,21 +12,21 @@ UPSTREAM: <carry>: Extend NodeLogQuery feature
 Fix handling of the "until" parameter when generating the journalctl
 command. This was incorrectly being passed with the "since" value.
 ---
- pkg/features/versioned_kube_features.go       |   4 +-
+ pkg/features/kube_features.go                 |   4 +-
  .../apis/config/validation/validation_test.go |   2 +
  pkg/kubelet/kubelet.go                        |   7 +-
  pkg/kubelet/kubelet_server_journal.go         | 111 +++++++++++++++---
  pkg/kubelet/kubelet_server_journal_linux.go   |  23 +++-
  pkg/kubelet/kubelet_server_journal_test.go    |  53 ++++++---
  pkg/kubelet/kubelet_server_journal_windows.go |  13 +-
- .../test_data/versioned_feature_list.yaml     |   4 +-
+ .../reference/versioned_feature_list.yaml     |   4 +-
  8 files changed, 170 insertions(+), 47 deletions(-)
 
-diff --git a/pkg/features/versioned_kube_features.go b/pkg/features/versioned_kube_features.go
-index ecee44abf7b..c0de606a44d 100644
---- a/pkg/features/versioned_kube_features.go
-+++ b/pkg/features/versioned_kube_features.go
-@@ -546,8 +546,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
+index cd910002443..9a512896152 100644
+--- a/pkg/features/kube_features.go
++++ b/pkg/features/kube_features.go
+@@ -1520,8 +1520,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
  	},
  
  	NodeLogQuery: {
@@ -38,10 +38,10 @@ index ecee44abf7b..c0de606a44d 100644
  
  	NodeSwap: {
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
-index 802c5506d37..a8bcabf8553 100644
+index 75fccec60ec..74cd96b31f7 100644
 --- a/pkg/kubelet/apis/config/validation/validation_test.go
 +++ b/pkg/kubelet/apis/config/validation/validation_test.go
-@@ -389,6 +389,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+@@ -396,6 +396,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
  			conf.CrashLoopBackOff = kubeletconfig.CrashLoopBackOffConfig{
  				MaxContainerRestartPeriod: &metav1.Duration{Duration: 0 * time.Second},
  			}
@@ -49,7 +49,7 @@ index 802c5506d37..a8bcabf8553 100644
  			return conf
  		},
  		errMsg: "invalid configuration: CrashLoopBackOff.MaxContainerRestartPeriod (got: 0 seconds) must be set between 1s and 300s",
-@@ -613,6 +614,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
+@@ -620,6 +621,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
  		}, {
  			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
  			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
@@ -58,10 +58,10 @@ index 802c5506d37..a8bcabf8553 100644
  				return conf
  			},
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index b8bbfece860..e44d877c8fe 100644
+index 71068f0e7ed..594ac395457 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
-@@ -1685,16 +1685,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
+@@ -1724,16 +1724,13 @@ func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) {
  					http.Error(w, errs.ToAggregate().Error(), http.StatusBadRequest)
  					return
  				} else if nlq != nil {
@@ -163,7 +163,7 @@ index 27c3421b883..460be616fb6 100644
  	if len(tailLinesValue) > 0 {
  		tailLines, err = strconv.Atoi(tailLinesValue)
  		if err != nil {
-@@ -186,15 +212,28 @@ func newNodeLogQuery(query url.Values) (*nodeLogQuery, field.ErrorList) {
+@@ -186,18 +212,31 @@ func newNodeLogQuery(query url.Values) (*nodeLogQuery, field.ErrorList) {
  	}
  
  	pattern := query.Get("pattern")
@@ -184,17 +184,20 @@ index 27c3421b883..460be616fb6 100644
 +		}
  	}
  
--	if len(allErrs) > 0 {
--		return nil, allErrs
--	}
 +	nlq.Since = query.Get("since")
 +	nlq.Until = query.Get("until")
 +	nlq.Format = query.Get("output")
- 
--	if reflect.DeepEqual(nlq, nodeLogQuery{}) {
-+	if len(allErrs) > 0 {
++
+ 	if len(allErrs) > 0 {
  		return nil, allErrs
  	}
+ 
+-	if reflect.DeepEqual(nlq, nodeLogQuery{}) {
+-		return nil, allErrs
+-	}
+-
+ 	return &nlq, allErrs
+ }
  
 @@ -219,14 +258,13 @@ func validateServices(services []string) field.ErrorList {
  func (n *nodeLogQuery) validate() field.ErrorList {
@@ -505,12 +508,12 @@ index ffe2df1772d..f55620de02f 100644
  		psCmd += fmt.Sprintf(`; EndTime="$Env:kubelet_untilTime"`)
  	}
  
-diff --git a/test/featuregates_linter/test_data/versioned_feature_list.yaml b/test/featuregates_linter/test_data/versioned_feature_list.yaml
-index a25a113071a..59e9acf691f 100644
---- a/test/featuregates_linter/test_data/versioned_feature_list.yaml
-+++ b/test/featuregates_linter/test_data/versioned_feature_list.yaml
-@@ -824,11 +824,11 @@
-     version: "1.26"
+diff --git a/test/compatibility_lifecycle/reference/versioned_feature_list.yaml b/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
+index 003189eb3f8..6d5eb514563 100644
+--- a/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
++++ b/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
+@@ -923,11 +923,11 @@
+     version: "1.33"
  - name: NodeLogQuery
    versionedSpecs:
 -  - default: false
@@ -524,5 +527,5 @@ index a25a113071a..59e9acf691f 100644
      preRelease: Beta
      version: "1.30"
 -- 
-2.47.1
+2.49.0
 

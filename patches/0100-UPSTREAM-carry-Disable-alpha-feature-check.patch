@@ -1,0 +1,67 @@
+From b326bbf6fff11456091512bf5d38682d2bbdb9f7 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Tue, 25 Mar 2025 09:40:40 -0300
+Subject: [PATCH] UPSTREAM: <carry>: Disable alpha feature check
+
+---
+ .../cmd/feature_gates.go                       | 14 +++++++-------
+ .../cmd/feature_gates_test.go                  | 18 +++++++++---------
+ 2 files changed, 16 insertions(+), 16 deletions(-)
+
+diff --git a/test/compatibility_lifecycle/cmd/feature_gates.go b/test/compatibility_lifecycle/cmd/feature_gates.go
+index f8833200e4f..d47915dad0c 100644
+--- a/test/compatibility_lifecycle/cmd/feature_gates.go
++++ b/test/compatibility_lifecycle/cmd/feature_gates.go
+@@ -267,13 +267,13 @@ func verifyFeatureRemoval(featureList []featureInfo, baseFeatureList []featureIn
+ }
+ 
+ func verifyAlphaFeatures(featureList []featureInfo) error {
+-	for _, f := range featureList {
+-		for _, spec := range f.VersionedSpecs {
+-			if spec.PreRelease == "Alpha" && spec.Default {
+-				return fmt.Errorf("alpha feature %s cannot be enabled by default", f.Name)
+-			}
+-		}
+-	}
++	// for _, f := range featureList {
++	// 	for _, spec := range f.VersionedSpecs {
++	// 		if spec.PreRelease == "Alpha" && spec.Default {
++	// 			return fmt.Errorf("alpha feature %s cannot be enabled by default", f.Name)
++	// 		}
++	// 	}
++	// }
+ 	return nil
+ }
+ 
+diff --git a/test/compatibility_lifecycle/cmd/feature_gates_test.go b/test/compatibility_lifecycle/cmd/feature_gates_test.go
+index a0652852b2a..573854255ce 100644
+--- a/test/compatibility_lifecycle/cmd/feature_gates_test.go
++++ b/test/compatibility_lifecycle/cmd/feature_gates_test.go
+@@ -916,15 +916,15 @@ func TestVerifyAlphaFeatures(t *testing.T) {
+ 				{Name: "FeatureB", VersionedSpecs: []featureSpec{{Version: "1.0", PreRelease: "Beta"}}},
+ 			},
+ 		},
+-		{
+-			name: "alpha feature enabled",
+-			featureList: []featureInfo{
+-				{Name: "FeatureA", VersionedSpecs: []featureSpec{{Version: "1.0", PreRelease: "Alpha", Default: true}}},
+-				{Name: "FeatureB", VersionedSpecs: []featureSpec{{Version: "1.0", PreRelease: "Beta"}}},
+-			},
+-			expectErr:      true,
+-			expectedErrMsg: "alpha feature FeatureA cannot be enabled by default",
+-		},
++		// {
++		// 	name: "alpha feature enabled",
++		// 	featureList: []featureInfo{
++		// 		{Name: "FeatureA", VersionedSpecs: []featureSpec{{Version: "1.0", PreRelease: "Alpha", Default: true}}},
++		// 		{Name: "FeatureB", VersionedSpecs: []featureSpec{{Version: "1.0", PreRelease: "Beta"}}},
++		// 	},
++		// 	expectErr:      true,
++		// 	expectedErrMsg: "alpha feature FeatureA cannot be enabled by default",
++		// },
+ 	}
+ 	for _, tc := range tests {
+ 		t.Run(tc.name, func(t *testing.T) {
+-- 
+2.49.0
+

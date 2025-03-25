@@ -1,4 +1,4 @@
-From 1b908db6da4fbbf5499f3ccc33d594c67dcd9549 Mon Sep 17 00:00:00 2001
+From 3f55cd1ef8710b4e28b36ca267c674742697d0da Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Thu, 29 Oct 2020 13:55:57 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-apiserver: wire through isTerminating
@@ -21,10 +21,10 @@ OpenShift-Rebase-Source: a736659ee67
  create mode 100644 staging/src/k8s.io/apiserver/pkg/server/patch_config.go
 
 diff --git a/cmd/kube-scheduler/app/server.go b/cmd/kube-scheduler/app/server.go
-index 1785bbdcc91..28eb9195179 100644
+index c9ab27027cf..0e2b68f54d1 100644
 --- a/cmd/kube-scheduler/app/server.go
 +++ b/cmd/kube-scheduler/app/server.go
-@@ -325,7 +325,7 @@ func buildHandlerChain(handler http.Handler, authn authenticator.Request, authz
+@@ -330,7 +330,7 @@ func buildHandlerChain(handler http.Handler, authn authenticator.Request, authz
  	handler = genericapifilters.WithAuthentication(handler, authn, failedHandler, nil, nil)
  	handler = genericapifilters.WithRequestInfo(handler, requestInfoResolver)
  	handler = genericapifilters.WithCacheControl(handler)
@@ -34,10 +34,10 @@ index 1785bbdcc91..28eb9195179 100644
  
  	return handler
 diff --git a/pkg/kubelet/server/server.go b/pkg/kubelet/server/server.go
-index 46ac2403d1d..b30c6fc7d0d 100644
+index 83d344d17b5..9ca7f86d9ad 100644
 --- a/pkg/kubelet/server/server.go
 +++ b/pkg/kubelet/server/server.go
-@@ -1118,7 +1118,7 @@ var statusesNoTracePred = httplog.StatusIsNot(
+@@ -1155,7 +1155,7 @@ var statusesNoTracePred = httplog.StatusIsNot(
  
  // ServeHTTP responds to HTTP requests on the Kubelet.
  func (s *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -47,18 +47,18 @@ index 46ac2403d1d..b30c6fc7d0d 100644
  	// monitor http requests
  	var serverType string
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
-index ee037aefed2..b3bc7d68aa2 100644
+index f2086239d65..ae451aded4c 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/config.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
-@@ -1059,7 +1059,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
+@@ -1073,7 +1073,7 @@ func DefaultBuildHandlerChain(apiHandler http.Handler, c *Config) http.Handler {
  	if c.ShutdownSendRetryAfter {
  		handler = genericfilters.WithRetryAfter(handler, c.lifecycleSignals.NotAcceptingNewRequest.Signaled())
  	}
 -	handler = genericfilters.WithHTTPLogging(handler)
 +	handler = genericfilters.WithHTTPLogging(handler, c.newIsTerminatingFunc())
- 	if c.FeatureGate.Enabled(genericfeatures.APIServerTracing) {
- 		handler = genericapifilters.WithTracing(handler, c.TracerProvider)
- 	}
+ 	handler = genericapifilters.WithLatencyTrackers(handler)
+ 	// WithRoutine will execute future handlers in a separate goroutine and serving
+ 	// handler in current goroutine to minimize the stack memory usage. It must be
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/filters/timeout_test.go b/staging/src/k8s.io/apiserver/pkg/server/filters/timeout_test.go
 index ffb15926bd4..4f107450759 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/filters/timeout_test.go
@@ -259,5 +259,5 @@ index 0f1e1fec60e..2a99efbddab 100644
  
  	return handler
 -- 
-2.47.1
+2.49.0
 

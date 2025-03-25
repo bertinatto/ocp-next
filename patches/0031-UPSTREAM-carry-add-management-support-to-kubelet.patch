@@ -1,4 +1,4 @@
-From dd3cf9523253e072080fe6caa89869f6db3c3b8c Mon Sep 17 00:00:00 2001
+From 5ec00fca3b032bb49f49b92fda9e7090b919dbe2 Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Mon, 29 Mar 2021 12:02:13 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add management support to kubelet
@@ -50,7 +50,7 @@ Signed-off-by: ehila <ehila@redhat.com>
 ---
  pkg/kubelet/cm/cpumanager/cpu_manager.go      |   6 +
  pkg/kubelet/cm/cpumanager/policy_static.go    |  22 +-
- .../cm/cpumanager/policy_static_test.go       |  51 +-
+ .../cm/cpumanager/policy_static_test.go       |  52 +-
  pkg/kubelet/cm/qos_container_manager_linux.go |   4 +
  pkg/kubelet/config/file.go                    |  11 +
  pkg/kubelet/kubelet.go                        |   5 +
@@ -58,7 +58,7 @@ Signed-off-by: ehila <ehila@redhat.com>
  pkg/kubelet/managed/cpu_shares.go             |  30 +
  pkg/kubelet/managed/managed.go                | 204 ++++++
  pkg/kubelet/managed/managed_test.go           | 675 ++++++++++++++++++
- 10 files changed, 1018 insertions(+), 17 deletions(-)
+ 10 files changed, 1019 insertions(+), 17 deletions(-)
  create mode 100644 pkg/kubelet/managed/cpu_shares.go
  create mode 100644 pkg/kubelet/managed/managed.go
  create mode 100644 pkg/kubelet/managed/managed_test.go
@@ -95,10 +95,10 @@ index 8b59ba67121..d4a10145d5b 100644
  		allContainers := pod.Spec.InitContainers
  		allContainers = append(allContainers, pod.Spec.Containers...)
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static.go b/pkg/kubelet/cm/cpumanager/policy_static.go
-index a9828474d64..05692761edf 100644
+index 28591c5baf1..d6fc1f12142 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static.go
-@@ -29,6 +29,7 @@ import (
+@@ -30,6 +30,7 @@ import (
  	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
  	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
  	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
@@ -106,7 +106,7 @@ index a9828474d64..05692761edf 100644
  	"k8s.io/kubernetes/pkg/kubelet/metrics"
  	"k8s.io/utils/cpuset"
  )
-@@ -214,6 +215,10 @@ func (p *staticPolicy) validateState(s state.State) error {
+@@ -215,6 +216,10 @@ func (p *staticPolicy) validateState(s state.State) error {
  		// state is empty initialize
  		s.SetDefaultCPUSet(allCPUs)
  		klog.InfoS("Static policy initialized", "defaultCPUSet", allCPUs)
@@ -117,7 +117,7 @@ index a9828474d64..05692761edf 100644
  		return nil
  	}
  
-@@ -227,7 +232,9 @@ func (p *staticPolicy) validateState(s state.State) error {
+@@ -228,7 +233,9 @@ func (p *staticPolicy) validateState(s state.State) error {
  				p.reservedCPUs.Intersection(tmpDefaultCPUset).String(), tmpDefaultCPUset.String())
  		}
  	} else {
@@ -128,7 +128,7 @@ index a9828474d64..05692761edf 100644
  			return fmt.Errorf("not all reserved cpus: \"%s\" are present in defaultCpuSet: \"%s\"",
  				p.reservedCPUs.String(), tmpDefaultCPUset.String())
  		}
-@@ -259,10 +266,17 @@ func (p *staticPolicy) validateState(s state.State) error {
+@@ -260,10 +267,17 @@ func (p *staticPolicy) validateState(s state.State) error {
  		}
  	}
  	totalKnownCPUs = totalKnownCPUs.Union(tmpCPUSets...)
@@ -150,7 +150,7 @@ index a9828474d64..05692761edf 100644
  
  	return nil
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static_test.go b/pkg/kubelet/cm/cpumanager/policy_static_test.go
-index 73003a2a5c4..59bd2e04f05 100644
+index db3a3649b56..f1f74a93bad 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static_test.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static_test.go
 @@ -21,6 +21,8 @@ import (
@@ -162,7 +162,7 @@ index 73003a2a5c4..59bd2e04f05 100644
  	v1 "k8s.io/api/core/v1"
  	"k8s.io/apimachinery/pkg/types"
  	utilfeature "k8s.io/apiserver/pkg/util/feature"
-@@ -983,19 +985,20 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
+@@ -982,19 +984,20 @@ func TestTopologyAwareAllocateCPUs(t *testing.T) {
  // above test cases are without kubelet --reserved-cpus cmd option
  // the following tests are with --reserved-cpus configured
  type staticPolicyTestWithResvList struct {
@@ -196,7 +196,7 @@ index 73003a2a5c4..59bd2e04f05 100644
  }
  
  func TestStaticPolicyStartWithResvList(t *testing.T) {
-@@ -1047,9 +1050,31 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
+@@ -1046,9 +1049,32 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
  			stDefaultCPUSet: cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
  			expNewErr:       fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of 0-1 did not equal 1)"),
  		},
@@ -225,9 +225,10 @@ index 73003a2a5c4..59bd2e04f05 100644
 +			defer func() {
 +				managed.TestOnlySetEnabled(wasManaged)
 +			}()
- 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUManagerPolicyAlphaOptions, true)
++			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUManagerPolicyAlphaOptions, true)
  			p, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), testCase.cpuPolicyOptions)
  			if !reflect.DeepEqual(err, testCase.expNewErr) {
+ 				t.Errorf("StaticPolicy Start() error (%v). expected error: %v but got: %v",
 diff --git a/pkg/kubelet/cm/qos_container_manager_linux.go b/pkg/kubelet/cm/qos_container_manager_linux.go
 index aac639c1e65..762ced265b2 100644
 --- a/pkg/kubelet/cm/qos_container_manager_linux.go
@@ -280,7 +281,7 @@ index 79e2af6ed62..d2526ec989d 100644
  	}
  
 diff --git a/pkg/kubelet/kubelet.go b/pkg/kubelet/kubelet.go
-index 642cf768505..59846206b72 100644
+index 594ac395457..a3f8eb197fc 100644
 --- a/pkg/kubelet/kubelet.go
 +++ b/pkg/kubelet/kubelet.go
 @@ -98,6 +98,7 @@ import (
@@ -291,7 +292,7 @@ index 642cf768505..59846206b72 100644
  	"k8s.io/kubernetes/pkg/kubelet/metrics"
  	"k8s.io/kubernetes/pkg/kubelet/metrics/collectors"
  	"k8s.io/kubernetes/pkg/kubelet/network/dns"
-@@ -703,6 +704,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
+@@ -704,6 +705,10 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
  
  	klet.runtimeService = kubeDeps.RemoteRuntimeService
  

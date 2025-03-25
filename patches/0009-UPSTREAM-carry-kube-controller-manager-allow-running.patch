@@ -1,4 +1,4 @@
-From 66961f04f47d0236718f86b23e6efab303897810 Mon Sep 17 00:00:00 2001
+From e074a2716930c5aab69478761aa6a4f868d5e7f6 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: allow running
@@ -40,10 +40,10 @@ blocks deletion indifinetelly as GC will ignore these resources.
  cmd/kube-controller-manager/app/patch_gc.go   |  37 +++
  .../app/patch_informers_openshift.go          | 293 ++++++++++++++++++
  .../app/patch_satoken.go                      |  87 ++++++
- pkg/controller/daemon/daemon_controller.go    |  24 +-
+ pkg/controller/daemon/daemon_controller.go    |  17 +-
  pkg/controller/daemon/patch_nodeselector.go   | 109 +++++++
  .../daemon/patch_nodeselector_test.go         | 186 +++++++++++
- 12 files changed, 851 insertions(+), 12 deletions(-)
+ 12 files changed, 848 insertions(+), 8 deletions(-)
  create mode 100644 cmd/kube-controller-manager/app/config/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch_gc.go
@@ -99,7 +99,7 @@ index 00000000000..a7112d003d4
 +	KubeDefaultProjectNodeSelector      string
 +}
 diff --git a/cmd/kube-controller-manager/app/controllermanager.go b/cmd/kube-controller-manager/app/controllermanager.go
-index dc847d66e5d..23772819bdf 100644
+index 822f334c94c..8f420a49779 100644
 --- a/cmd/kube-controller-manager/app/controllermanager.go
 +++ b/cmd/kube-controller-manager/app/controllermanager.go
 @@ -140,6 +140,11 @@ controller, and serviceaccounts controller.`,
@@ -123,7 +123,7 @@ index dc847d66e5d..23772819bdf 100644
  	// ClientBuilder will provide a client for this controller to use
  	ClientBuilder clientbuilder.ControllerClientBuilder
  
-@@ -619,7 +626,12 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
+@@ -620,7 +627,12 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
  	}
  
  	versionedClient := rootClientBuilder.ClientOrDie("shared-informers")
@@ -137,7 +137,7 @@ index dc847d66e5d..23772819bdf 100644
  
  	metadataClient := metadata.NewForConfigOrDie(rootClientBuilder.ConfigOrDie("metadata-informers"))
  	metadataInformers := metadatainformer.NewSharedInformerFactoryWithOptions(metadataClient, ResyncPeriod(s)(), metadatainformer.WithTransform(trim))
-@@ -639,6 +651,7 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
+@@ -640,6 +652,7 @@ func CreateControllerContext(ctx context.Context, s *config.CompletedConfig, roo
  	}, 30*time.Second, ctx.Done())
  
  	controllerContext := ControllerContext{
@@ -145,7 +145,7 @@ index dc847d66e5d..23772819bdf 100644
  		ClientBuilder:                   clientBuilder,
  		InformerFactory:                 sharedInformers,
  		ObjectOrMetadataInformerFactory: informerfactory.NewInformerFactory(sharedInformers, metadataInformers),
-@@ -821,10 +834,10 @@ func startServiceAccountTokenController(ctx context.Context, controllerContext C
+@@ -822,10 +835,10 @@ func startServiceAccountTokenController(ctx context.Context, controllerContext C
  		controllerContext.InformerFactory.Core().V1().ServiceAccounts(),
  		controllerContext.InformerFactory.Core().V1().Secrets(),
  		rootClientBuilder.ClientOrDie("tokens-controller"),
@@ -716,10 +716,10 @@ index 00000000000..82f1bb9b3ff
 +	return nil
 +}
 diff --git a/pkg/controller/daemon/daemon_controller.go b/pkg/controller/daemon/daemon_controller.go
-index 0076ca2411a..07cf0cb537e 100644
+index 4db3a5933d9..fe03727a51e 100644
 --- a/pkg/controller/daemon/daemon_controller.go
 +++ b/pkg/controller/daemon/daemon_controller.go
-@@ -120,7 +120,13 @@ type DaemonSetsController struct {
+@@ -122,7 +122,13 @@ type DaemonSetsController struct {
  	nodeLister corelisters.NodeLister
  	// nodeStoreSynced returns true if the node store has been synced at least once.
  	// Added as a member to the struct to allow injection for testing.
@@ -734,7 +734,7 @@ index 0076ca2411a..07cf0cb537e 100644
  
  	// DaemonSet keys that need to be synced.
  	queue workqueue.TypedRateLimitingInterface[string]
-@@ -297,6 +303,11 @@ func (dsc *DaemonSetsController) Run(ctx context.Context, workers int) {
+@@ -313,6 +319,11 @@ func (dsc *DaemonSetsController) Run(ctx context.Context, workers int) {
  	if !cache.WaitForNamedCacheSync("daemon sets", ctx.Done(), dsc.podStoreSynced, dsc.nodeStoreSynced, dsc.historyStoreSynced, dsc.dsStoreSynced) {
  		return
  	}
@@ -746,28 +746,7 @@ index 0076ca2411a..07cf0cb537e 100644
  
  	for i := 0; i < workers; i++ {
  		go wait.UntilWithContext(ctx, dsc.runWorker, time.Second)
-@@ -651,7 +662,7 @@ func (dsc *DaemonSetsController) addNode(logger klog.Logger, obj interface{}) {
- 	}
- 	node := obj.(*v1.Node)
- 	for _, ds := range dsList {
--		if shouldRun, _ := NodeShouldRunDaemonPod(node, ds); shouldRun {
-+		if shouldRun, _ := dsc.nodeShouldRunDaemonPod(node, ds); shouldRun {
- 			dsc.enqueueDaemonSet(ds)
- 		}
- 	}
-@@ -678,9 +689,8 @@ func (dsc *DaemonSetsController) updateNode(logger klog.Logger, old, cur interfa
- 	}
- 	// TODO: it'd be nice to pass a hint with these enqueues, so that each ds would only examine the added node (unless it has other work to do, too).
- 	for _, ds := range dsList {
--		// If NodeShouldRunDaemonPod needs to uses other than Labels and Taints (mutable) properties of node, it needs to update shouldIgnoreNodeUpdate.
--		oldShouldRun, oldShouldContinueRunning := NodeShouldRunDaemonPod(oldNode, ds)
--		currentShouldRun, currentShouldContinueRunning := NodeShouldRunDaemonPod(curNode, ds)
-+		oldShouldRun, oldShouldContinueRunning := dsc.nodeShouldRunDaemonPod(oldNode, ds)
-+		currentShouldRun, currentShouldContinueRunning := dsc.nodeShouldRunDaemonPod(curNode, ds)
- 		if (oldShouldRun != currentShouldRun) || (oldShouldContinueRunning != currentShouldContinueRunning) {
- 			dsc.enqueueDaemonSet(ds)
- 		}
-@@ -786,7 +796,7 @@ func (dsc *DaemonSetsController) podsShouldBeOnNode(
+@@ -810,7 +821,7 @@ func (dsc *DaemonSetsController) podsShouldBeOnNode(
  	hash string,
  ) (nodesNeedingDaemonPods, podsToDelete []string) {
  
@@ -776,7 +755,7 @@ index 0076ca2411a..07cf0cb537e 100644
  	daemonPods, exists := nodeToDaemonPods[node.Name]
  
  	switch {
-@@ -1141,7 +1151,7 @@ func (dsc *DaemonSetsController) updateDaemonSetStatus(ctx context.Context, ds *
+@@ -1165,7 +1176,7 @@ func (dsc *DaemonSetsController) updateDaemonSetStatus(ctx context.Context, ds *
  	var desiredNumberScheduled, currentNumberScheduled, numberMisscheduled, numberReady, updatedNumberScheduled, numberAvailable int
  	now := dsc.failedPodsBackoff.Clock.Now()
  	for _, node := range nodeList {
