@@ -1,4 +1,4 @@
-From dd468dc5243592bdc12653837a5cd5d6082f3f1e Mon Sep 17 00:00:00 2001
+From 005e6bc2e9624eb4333c8011390b8f04b3ecfa86 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
@@ -17785,7 +17785,7 @@ index 00000000000..05ef26277fc
 +}
 diff --git a/openshift-kube-apiserver/admission/scheduler/podnodeconstraints/admission_test.go b/openshift-kube-apiserver/admission/scheduler/podnodeconstraints/admission_test.go
 new file mode 100644
-index 00000000000..a5587c5d0ee
+index 00000000000..c2b327c689e
 --- /dev/null
 +++ b/openshift-kube-apiserver/admission/scheduler/podnodeconstraints/admission_test.go
 @@ -0,0 +1,283 @@
@@ -17928,7 +17928,7 @@ index 00000000000..a5587c5d0ee
 +		}
 +		attrs := admission.NewAttributesRecord(tc.resource, nil, kapi.Kind("Pod").WithVersion("version"), ns, "test", kapi.Resource("pods").WithVersion("version"), "", admission.Create, nil, false, tc.userinfo)
 +		if tc.expectedErrorMsg != "" {
-+			expectedError = admission.NewForbidden(attrs, fmt.Errorf(tc.expectedErrorMsg))
++			expectedError = admission.NewForbidden(attrs, fmt.Errorf("%s", tc.expectedErrorMsg))
 +		}
 +		err = prc.(admission.ValidationInterface).Validate(context.TODO(), attrs, nil)
 +		checkAdmitError(t, err, expectedError, errPrefix)
@@ -23092,5 +23092,5 @@ index 00000000000..8b34da7aa32
 +	return data, nil
 +}
 -- 
-2.47.1
+2.49.0
 

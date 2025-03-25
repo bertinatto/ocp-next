@@ -109,6 +109,9 @@ func (g *GitWrapper) Checkout(branch string) error {
 }
 
 func (g *GitWrapper) Clean() error {
+	if err := g.runGit("reset", "--hard"); err != nil {
+		return err
+	}
 	return g.runGit("clean", "-fdx")
 }
 

@@ -1,4 +1,4 @@
-From ddc038ff691545d491c5a38015b272bd8c569988 Mon Sep 17 00:00:00 2001
+From 8e0c7d3643ff8e95917189bca30e4c61c2fd50f6 Mon Sep 17 00:00:00 2001
 From: Miciah Masters <miciah.masters@gmail.com>
 Date: Thu, 4 Feb 2021 23:31:36 -0500
 Subject: [PATCH] UPSTREAM: <carry>: Prefer local endpoint for cluster DNS
@@ -16,12 +16,12 @@ for the cluster DNS service.
  2 files changed, 182 insertions(+)
 
 diff --git a/pkg/proxy/iptables/proxier.go b/pkg/proxy/iptables/proxier.go
-index 086c4f30bb4..b357be8e856 100644
+index d50e6c06bd2..1d50d202fc5 100644
 --- a/pkg/proxy/iptables/proxier.go
 +++ b/pkg/proxy/iptables/proxier.go
-@@ -1000,6 +1000,21 @@ func (proxier *Proxier) syncProxyRules() {
+@@ -989,6 +989,21 @@ func (proxier *Proxier) syncProxyRules() {
  		allEndpoints := proxier.endpointsMap[svcName]
- 		clusterEndpoints, localEndpoints, allLocallyReachableEndpoints, hasEndpoints := proxy.CategorizeEndpoints(allEndpoints, svcInfo, proxier.nodeLabels)
+ 		clusterEndpoints, localEndpoints, allLocallyReachableEndpoints, hasEndpoints := proxy.CategorizeEndpoints(allEndpoints, svcInfo, proxier.nodeName, proxier.nodeLabels)
  
 +		// Prefer local endpoint for the DNS service.
 +		// Fixes <https://bugzilla.redhat.com/show_bug.cgi?id=1919737>.
@@ -42,10 +42,10 @@ index 086c4f30bb4..b357be8e856 100644
  		clusterPolicyChain := svcInfo.clusterPolicyChainName
  		usesClusterPolicyChain := len(clusterEndpoints) > 0 && svcInfo.UsesClusterEndpoints()
 diff --git a/pkg/proxy/iptables/proxier_test.go b/pkg/proxy/iptables/proxier_test.go
-index b42490764a8..17a852fcd2a 100644
+index ef1747396fc..4d270818f1f 100644
 --- a/pkg/proxy/iptables/proxier_test.go
 +++ b/pkg/proxy/iptables/proxier_test.go
-@@ -2081,6 +2081,173 @@ func TestClusterIPGeneral(t *testing.T) {
+@@ -2082,6 +2082,173 @@ func TestClusterIPGeneral(t *testing.T) {
  	})
  }
  
@@ -81,7 +81,7 @@ index b42490764a8..17a852fcd2a 100644
 +				NodeName:  ptr.To("node2"),
 +			}, {
 +				Addresses: []string{"10.180.0.1"},
-+				NodeName:  ptr.To(testHostname),
++				NodeName:  ptr.To(testNodeName),
 +			}}
 +			eps.Ports = []discovery.EndpointPort{{
 +				Name:     ptr.To(svcPortName.Port),
@@ -136,7 +136,7 @@ index b42490764a8..17a852fcd2a 100644
 +				NodeName:  ptr.To("node2"),
 +			}, {
 +				Addresses: []string{"10.180.0.1"},
-+				NodeName:  ptr.To(testHostname),
++				NodeName:  ptr.To(testNodeName),
 +			}}
 +			eps.Ports = []discovery.EndpointPort{{
 +				Name:     ptr.To(svcPortName.Port),
@@ -220,5 +220,5 @@ index b42490764a8..17a852fcd2a 100644
  	ipt := iptablestest.NewFake()
  	fp := NewFakeProxier(ipt)
 -- 
-2.47.1
+2.49.0
 

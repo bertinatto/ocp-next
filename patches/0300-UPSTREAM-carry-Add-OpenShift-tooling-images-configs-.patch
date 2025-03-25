@@ -1,22 +1,50 @@
-From a15ce429db06f90bfe0131be5f10bb0b8333c93c Mon Sep 17 00:00:00 2001
-From: Stephen Goeddel <sgoeddel@redhat.com>
-Date: Mon, 24 Feb 2025 09:09:22 -0500
-Subject: [PATCH] UPSTREAM: <carry>: translate all existing rules to use
- filtering and the environemntSelector in the specs
+From d807bac5bdf68607aa67a0790466e308c14faded Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 22 Jan 2025 09:59:33 +0100
+Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
+ docs
 
 ---
+ .ci-operator.yaml                             |   2 +-
+ build/pause/Dockerfile.Rhel                   |   2 +-
  .../cmd/k8s-tests-ext/disabled_tests.go       | 215 ++++++++++++++++
  .../k8s-tests-ext/environment_selectors.go    | 231 ++++++++++++++++++
- openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  12 +-
+ openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- 4 files changed, 508 insertions(+), 2 deletions(-)
+ openshift-hack/e2e/annotate/rules.go          |  24 +-
+ openshift-hack/e2e/include.go                 |   1 -
+ .../images/hyperkube/Dockerfile.rhel          |   4 +-
+ .../Dockerfile.rhel                           |  10 +-
+ .../images/kube-proxy/Dockerfile.rhel         |   2 +-
+ openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
+ 12 files changed, 554 insertions(+), 35 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
 
+diff --git a/.ci-operator.yaml b/.ci-operator.yaml
+index 7c15f83e3e6..93022ee9763 100644
+--- a/.ci-operator.yaml
++++ b/.ci-operator.yaml
+@@ -1,4 +1,4 @@
+ build_root_image:
+   name: release
+   namespace: openshift
+-  tag: rhel-9-release-golang-1.23-openshift-4.19
++  tag: rhel-9-release-golang-1.24-nofips-openshift-4.19
+diff --git a/build/pause/Dockerfile.Rhel b/build/pause/Dockerfile.Rhel
+index 5dc852525b0..b16081a19ef 100644
+--- a/build/pause/Dockerfile.Rhel
++++ b/build/pause/Dockerfile.Rhel
+@@ -1,4 +1,4 @@
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
+ WORKDIR /go/src/github.com/openshift/kubernetes/build/pause
+ COPY . .
+ RUN mkdir -p bin && \
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..e15e870b085
+index 00000000000..7e3cc259761
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 @@ -0,0 +1,215 @@
@@ -180,6 +208,9 @@ index 00000000000..e15e870b085
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-38839
 +			"[sig-network] [Feature:Traffic Distribution] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client",
++
++			// https://issues.redhat.com/browse/OCPBUGS-45273
++			"[sig-network] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes",
 +		},
 +		// tests that need to be temporarily disabled while the rebase is in progress.
 +		"RebaseInProgress": {
@@ -191,9 +222,6 @@ index 00000000000..e15e870b085
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			"[sig-node] ImageCredentialProvider [Feature:KubeletCredentialProviders] should be able to create pod with image credentials fetched from external credential provider",
-+
-+			// https://issues.redhat.com/browse/OCPBUGS-45273
-+			"[sig-network] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes",
 +		},
 +		// tests that may work, but we don't support them
 +		"Unsupported": {
@@ -473,27 +501,51 @@ index 00000000000..bf6aa222933
 +	}
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
-index 6c1e79ee84f..553a468fd5e 100644
+index 03b626a827a..4eef0b4d7f6 100644
 --- a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
 +++ b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
-@@ -5,6 +5,7 @@ import (
- 	"os"
- 	"reflect"
+@@ -2,15 +2,17 @@ package main
  
-+	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
- 	"k8s.io/kubernetes/test/e2e/framework"
+ import (
+ 	"flag"
+-	"k8s.io/kubernetes/test/e2e/framework"
+ 	"os"
++	"reflect"
++
++	"k8s.io/kubernetes/test/e2e/framework"
  
  	"github.com/spf13/cobra"
-@@ -13,7 +14,7 @@ import (
+ 	"github.com/spf13/pflag"
+ 
  	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
- 	"github.com/openshift-eng/openshift-tests-extension/pkg/extension"
  	e "github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 -	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
 +	et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
  	g "github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
  	v "github.com/openshift-eng/openshift-tests-extension/pkg/version"
  
-@@ -106,12 +107,19 @@ func main() {
+@@ -18,6 +20,7 @@ import (
+ 	utilflag "k8s.io/component-base/cli/flag"
+ 	"k8s.io/component-base/logs"
+ 	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
++	"k8s.io/kubernetes/test/utils/image"
+ 
+ 	// initialize framework extensions
+ 	_ "k8s.io/kubernetes/test/e2e/framework/debug/init"
+@@ -64,6 +67,12 @@ func main() {
+ 		Qualifiers: []string{`labels.exists(l, l == "Serial") && labels.exists(l, l == "Conformance")`},
+ 	})
+ 
++	for k, v := range image.GetOriginalImageConfigs() {
++		image := convertToImage(v)
++		image.Index = int(k)
++		kubeTestsExtension.RegisterImage(image)
++	}
++
+ 	//FIXME(stbenjam): what other suites does k8s-test contribute to?
+ 
+ 	// Build our specs from ginkgo
+@@ -87,12 +96,19 @@ func main() {
  	//		  the environmental skip code from the enhancement once its implemented.
  	//		- Make sure to account for test renames that occur because of removal of these
  	//		  annotations
@@ -514,6 +566,32 @@ index 6c1e79ee84f..553a468fd5e 100644
  	kubeTestsExtension.AddSpecs(specs)
  
  	// Cobra stuff
+@@ -110,3 +126,25 @@ func main() {
+ 		os.Exit(1)
+ 	}
+ }
++
++// convertToImages converts an image.Config to an extension.Image, which
++// can easily be serialized to JSON. Since image.Config has unexported fields,
++// reflection is used to read its values.
++func convertToImage(obj interface{}) e.Image {
++	image := e.Image{}
++	val := reflect.ValueOf(obj)
++	typ := reflect.TypeOf(obj)
++	for i := 0; i < val.NumField(); i++ {
++		structField := typ.Field(i)
++		fieldValue := val.Field(i)
++		switch structField.Name {
++		case "registry":
++			image.Registry = fieldValue.String()
++		case "name":
++			image.Name = fieldValue.String()
++		case "version":
++			image.Version = fieldValue.String()
++		}
++	}
++	return image
++}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/labels.go b/openshift-hack/cmd/k8s-tests-ext/labels.go
 new file mode 100644
 index 00000000000..7932f2eb1b6
@@ -572,6 +650,154 @@ index 00000000000..7932f2eb1b6
 +		specs.SelectAny(selectFunctions).AddLabel(label)
 +	}
 +}
+diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
+index a62f99f1fd9..ccf0c71c738 100644
+--- a/openshift-hack/e2e/annotate/rules.go
++++ b/openshift-hack/e2e/annotate/rules.go
+@@ -26,6 +26,7 @@ var (
+ 			`\[Feature:RelaxedDNSSearchValidation\]`,
+ 			`\[Feature:PodLogsQuerySplitStreams\]`,
+ 			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
++			`\[Feature:volumegroupsnapshot\]`, // disabled Beta
+ 		},
+ 		// tests for features that are not implemented in openshift
+ 		"[Disabled:Unimplemented]": {
+@@ -162,6 +163,9 @@ var (
+ 
+ 			// https://issues.redhat.com/browse/OCPBUGS-38839
+ 			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
++
++			// https://issues.redhat.com/browse/OCPBUGS-45273
++			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
+ 		},
+ 		// tests that need to be temporarily disabled while the rebase is in progress.
+ 		"[Disabled:RebaseInProgress]": {
+@@ -173,26 +177,6 @@ var (
+ 
+ 			// https://issues.redhat.com/browse/OCPBUGS-17194
+ 			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-45214
+-			// Even though this feature is not GA in k/k, it will be GA in OCP 4.19, so we should fix it and unskip this test
+-			`\[Feature:volumegroupsnapshot\]`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-45273
+-			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-45273
+-			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-45274
+-			// https://github.com/kubernetes/kubernetes/issues/129056
+-			`\[sig-node\] PodRejectionStatus Kubelet should reject pod when the node didn't have enough resource`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-45359
+-			`\[Feature:RecoverVolumeExpansionFailure\]`,
+-
+-			// https://issues.redhat.com/browse/OCPBUGS-46477
+-			`\[sig-storage\] In-tree Volumes \[Driver: azure-file\]`,
+ 		},
+ 		// tests that may work, but we don't support them
+ 		"[Disabled:Unsupported]": {
+diff --git a/openshift-hack/e2e/include.go b/openshift-hack/e2e/include.go
+index 48efbca4a3e..e0b481a17f0 100644
+--- a/openshift-hack/e2e/include.go
++++ b/openshift-hack/e2e/include.go
+@@ -10,7 +10,6 @@ package e2e
+ import (
+ 	// define and freeze constants
+ 	_ "k8s.io/kubernetes/test/e2e/feature"
+-	_ "k8s.io/kubernetes/test/e2e/nodefeature"
+ 
+ 	// test sources
+ 	_ "k8s.io/kubernetes/test/e2e/apimachinery"
+diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
+index fabdce0b9c0..c5b165e4833 100644
+--- a/openshift-hack/images/hyperkube/Dockerfile.rhel
++++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
+@@ -1,4 +1,4 @@
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+ RUN make WHAT='cmd/kube-apiserver cmd/kube-controller-manager cmd/kube-scheduler cmd/kubelet cmd/watch-termination openshift-hack/cmd/k8s-tests openshift-hack/cmd/k8s-tests-ext' && \
+@@ -14,4 +14,4 @@ COPY --from=builder /tmp/build/* /usr/bin/
+ LABEL io.k8s.display-name="OpenShift Kubernetes Server Commands" \
+       io.k8s.description="OpenShift is a platform for developing, building, and deploying containerized applications." \
+       io.openshift.tags="openshift,hyperkube" \
+-      io.openshift.build.versions="kubernetes=1.32.1"
+\ No newline at end of file
++      io.openshift.build.versions="kubernetes=1.33.0"
+\ No newline at end of file
+diff --git a/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel b/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel
+index fb57a6042fe..ecf3d1828a9 100644
+--- a/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel
++++ b/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel
+@@ -2,7 +2,7 @@
+ # the kube-apiserver layered on top of the cluster-native Linux installer image.
+ # The resulting image is used to build the openshift-install binary.
+ 
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS macbuilder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS macbuilder
+ ARG TAGS=""
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+@@ -10,7 +10,7 @@ ENV KUBE_BUILD_PLATFORMS=darwin/amd64
+ ENV KUBE_STATIC_OVERRIDES=kube-apiserver
+ RUN make WHAT='cmd/kube-apiserver'
+ 
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS macarmbuilder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS macarmbuilder
+ ARG TAGS=""
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+@@ -18,7 +18,7 @@ ENV KUBE_BUILD_PLATFORMS=darwin/arm64
+ ENV KUBE_STATIC_OVERRIDES=kube-apiserver
+ RUN make WHAT='cmd/kube-apiserver'
+ 
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS linuxbuilder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS linuxbuilder
+ ARG TAGS=""
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+@@ -27,7 +27,7 @@ ENV KUBE_BUILD_PLATFORMS=linux/amd64
+ ENV KUBE_STATIC_OVERRIDES=kube-apiserver
+ RUN make WHAT='cmd/kube-apiserver'
+ 
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS linuxarmbuilder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS linuxarmbuilder
+ ARG TAGS=""
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+@@ -36,7 +36,7 @@ ENV KUBE_BUILD_PLATFORMS=linux/arm64
+ ENV KUBE_STATIC_OVERRIDES=kube-apiserver
+ RUN make WHAT='cmd/kube-apiserver'
+ 
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
+ ARG TAGS=""
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+diff --git a/openshift-hack/images/kube-proxy/Dockerfile.rhel b/openshift-hack/images/kube-proxy/Dockerfile.rhel
+index 619ce5942b8..088acdb04bd 100644
+--- a/openshift-hack/images/kube-proxy/Dockerfile.rhel
++++ b/openshift-hack/images/kube-proxy/Dockerfile.rhel
+@@ -1,4 +1,4 @@
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+ RUN make WHAT='cmd/kube-proxy' && \
+diff --git a/openshift-hack/images/tests/Dockerfile.rhel b/openshift-hack/images/tests/Dockerfile.rhel
+index ff0b2fa6e1d..d9254eda59d 100644
+--- a/openshift-hack/images/tests/Dockerfile.rhel
++++ b/openshift-hack/images/tests/Dockerfile.rhel
+@@ -1,4 +1,4 @@
+-FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
++FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
+ WORKDIR /go/src/k8s.io/kubernetes
+ COPY . .
+ RUN make WHAT=openshift-hack/e2e/k8s-e2e.test; \
 -- 
 2.49.0
 

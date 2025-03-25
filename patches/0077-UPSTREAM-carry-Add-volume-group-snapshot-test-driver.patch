@@ -1,4 +1,4 @@
-From 7827b463fc5ad616d26f7e00350ebcc53a07ac49 Mon Sep 17 00:00:00 2001
+From 3483d3c55ba949336f2e799db4f100af4bd2e135 Mon Sep 17 00:00:00 2001
 From: Jan Safranek <jsafrane@redhat.com>
 Date: Wed, 5 Mar 2025 15:22:16 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add volume group snapshot test driver
@@ -17,9 +17,9 @@ with the existing ones.
 ---
  openshift-hack/e2e/annotate/rules.go          |   5 +
  openshift-hack/test-kubernetes-e2e.sh         |   3 +
- .../openshift_group_snapshot_driver.go        | 285 ++++++++++++++++++
+ .../openshift_group_snapshot_driver.go        | 283 ++++++++++++++++++
  test/e2e/storage/openshift_csi_volumes.go     |  45 +++
- 4 files changed, 338 insertions(+)
+ 4 files changed, 336 insertions(+)
  create mode 100644 test/e2e/storage/drivers/openshift_group_snapshot_driver.go
  create mode 100644 test/e2e/storage/openshift_csi_volumes.go
 
@@ -55,10 +55,10 @@ index ea005aee55a..efa25590ee0 100755
    DEFAULT_TEST_ARGS="-focus=\[Serial\] -skip=${COMMON_SKIPS}"
 diff --git a/test/e2e/storage/drivers/openshift_group_snapshot_driver.go b/test/e2e/storage/drivers/openshift_group_snapshot_driver.go
 new file mode 100644
-index 00000000000..cdbbbf5484f
+index 00000000000..5b4c8218ce2
 --- /dev/null
 +++ b/test/e2e/storage/drivers/openshift_group_snapshot_driver.go
-@@ -0,0 +1,285 @@
+@@ -0,0 +1,283 @@
 +package drivers
 +
 +import (
@@ -238,7 +238,6 @@ index 00000000000..cdbbbf5484f
 +	// Create secondary namespace which will be used for creating driver
 +	driverNamespace := utils.CreateDriverNamespace(ctx, f)
 +	driverns := driverNamespace.Name
-+	testns := f.Namespace.Name
 +
 +	ginkgo.By(fmt.Sprintf("deploying %s driver", h.driverInfo.Name))
 +	cancelLogging := utils.StartPodLogs(ctx, f, driverNamespace)
@@ -337,7 +336,6 @@ index 00000000000..cdbbbf5484f
 +	cleanupFunc := generateDriverCleanupFunc(
 +		f,
 +		h.driverInfo.Name,
-+		testns,
 +		driverns,
 +		cancelLogging)
 +	ginkgo.DeferCleanup(cleanupFunc)

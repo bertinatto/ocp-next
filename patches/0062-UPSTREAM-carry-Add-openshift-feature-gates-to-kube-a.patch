@@ -1,4 +1,4 @@
-From 5643be776b5e1ab6ba147c2592dae5b67e551750 Mon Sep 17 00:00:00 2001
+From 7562a1ec7f01e17e25b45f176769007839f62399 Mon Sep 17 00:00:00 2001
 From: Swarup Ghosh <swghosh@redhat.com>
 Date: Fri, 15 Mar 2024 18:41:09 +0530
 Subject: [PATCH] UPSTREAM: <carry>: Add openshift feature gates to
@@ -7,15 +7,15 @@ Subject: [PATCH] UPSTREAM: <carry>: Add openshift feature gates to
 Signed-off-by: Swarup Ghosh <swghosh@redhat.com>
 ---
  pkg/features/kube_features.go      |  1 +
- pkg/features/openshift_features.go | 15 +++++++++++++++
- 2 files changed, 16 insertions(+)
+ pkg/features/openshift_features.go | 21 +++++++++++++++++++++
+ 2 files changed, 22 insertions(+)
  create mode 100644 pkg/features/openshift_features.go
 
 diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index 9a512896152..694cefe057d 100644
+index 6b4d1a7ecd3..639b549a5b7 100644
 --- a/pkg/features/kube_features.go
 +++ b/pkg/features/kube_features.go
-@@ -1859,6 +1859,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
+@@ -1878,6 +1878,7 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
  }
  
  func init() {
@@ -25,23 +25,25 @@ index 9a512896152..694cefe057d 100644
  
 diff --git a/pkg/features/openshift_features.go b/pkg/features/openshift_features.go
 new file mode 100644
-index 00000000000..6325606ee88
+index 00000000000..2ed4e14b854
 --- /dev/null
 +++ b/pkg/features/openshift_features.go
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,17 @@
 +package features
 +
 +import (
++	"k8s.io/apimachinery/pkg/util/version"
 +	"k8s.io/component-base/featuregate"
 +)
 +
 +var RouteExternalCertificate featuregate.Feature = "RouteExternalCertificate"
++var MinimumKubeletVersion featuregate.Feature = "MinimumKubeletVersion"
 +
 +// registerOpenshiftFeatures injects openshift-specific feature gates
 +func registerOpenshiftFeatures() {
-+	defaultKubernetesFeatureGates[RouteExternalCertificate] = featuregate.FeatureSpec{
-+		Default:    false,
-+		PreRelease: featuregate.Alpha,
++	// Introduced in 4.16
++	defaultVersionedKubernetesFeatureGates[RouteExternalCertificate] = featuregate.VersionedSpecs{
++		{Version: version.MustParse("1.29"), Default: false, PreRelease: featuregate.Alpha},
 +	}
 +}
 -- 
