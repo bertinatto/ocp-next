@@ -1,4 +1,4 @@
-From d807bac5bdf68607aa67a0790466e308c14faded Mon Sep 17 00:00:00 2001
+From 4015ab227b89615a0db8175807034669c06360a3 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -7,17 +7,17 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
 ---
  .ci-operator.yaml                             |   2 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
- .../cmd/k8s-tests-ext/disabled_tests.go       | 215 ++++++++++++++++
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 217 ++++++++++++++++
  .../k8s-tests-ext/environment_selectors.go    | 231 ++++++++++++++++++
  openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- openshift-hack/e2e/annotate/rules.go          |  24 +-
+ openshift-hack/e2e/annotate/rules.go          |  36 +--
  openshift-hack/e2e/include.go                 |   1 -
  .../images/hyperkube/Dockerfile.rhel          |   4 +-
  .../Dockerfile.rhel                           |  10 +-
  .../images/kube-proxy/Dockerfile.rhel         |   2 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
- 12 files changed, 554 insertions(+), 35 deletions(-)
+ 12 files changed, 563 insertions(+), 40 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -44,10 +44,10 @@ index 5dc852525b0..b16081a19ef 100644
  RUN mkdir -p bin && \
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..7e3cc259761
+index 00000000000..aebbce373e2
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
-@@ -0,0 +1,215 @@
+@@ -0,0 +1,217 @@
 +package main
 +
 +import (
@@ -60,23 +60,19 @@ index 00000000000..7e3cc259761
 +	var disabledByReason = map[string][]string{
 +		"Alpha": { // alpha features that are not gated
 +			"[Feature:StorageVersionAPI]",
-+			"[Feature:InPlacePodVerticalScaling]",
-+			"[Feature:ServiceCIDRs]",
 +			"[Feature:ClusterTrustBundle]",
 +			"[Feature:SELinuxMount]",
 +			"[FeatureGate:SELinuxMount]",
 +			"[Feature:UserNamespacesPodSecurityStandards]",
-+			"[Feature:UserNamespacesSupport]", // disabled Beta
 +			"[Feature:DynamicResourceAllocation]",
 +			"[Feature:VolumeAttributesClass]", // disabled Beta
 +			"[sig-cli] Kubectl client Kubectl prune with applyset should apply and prune objects", // Alpha feature since k8s 1.27
 +			// 4.19
 +			"[Feature:PodLevelResources]",
-+			"[Feature:SchedulerAsyncPreemption]",
-+			"[Feature:RelaxedDNSSearchValidation]",
 +			"[Feature:PodLogsQuerySplitStreams]",
-+			"[Feature:PodLifecycleSleepActionAllowZero]",
 +			"[Feature:volumegroupsnapshot]",
++			// 4.20
++			"[Feature:OffByDefault]",
 +		},
 +		// tests for features that are not implemented in openshift
 +		"Unimplemented": {
@@ -207,7 +203,7 @@ index 00000000000..7e3cc259761
 +			"[sig-node] [Feature:PodLifecycleSleepAction] when create a pod with lifecycle hook using sleep action valid prestop hook using sleep action",
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-38839
-+			"[sig-network] [Feature:Traffic Distribution] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client",
++			"[sig-network] Traffic Distribution",
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45273
 +			"[sig-network] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes",
@@ -222,6 +218,12 @@ index 00000000000..7e3cc259761
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			"[sig-node] ImageCredentialProvider [Feature:KubeletCredentialProviders] should be able to create pod with image credentials fetched from external credential provider",
++
++			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743190159388209
++			"SELinuxMount",
++
++			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743612984702079
++			`[Feature:SchedulerAsyncPreemption]`,
 +		},
 +		// tests that may work, but we don't support them
 +		"Unsupported": {
@@ -651,36 +653,57 @@ index 00000000000..7932f2eb1b6
 +	}
 +}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..ccf0c71c738 100644
+index a62f99f1fd9..a9d864f8e02 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -26,6 +26,7 @@ var (
- 			`\[Feature:RelaxedDNSSearchValidation\]`,
+@@ -10,22 +10,19 @@ var (
+ 		// alpha features that are not gated
+ 		"[Disabled:Alpha]": {
+ 			`\[Feature:StorageVersionAPI\]`,
+-			`\[Feature:InPlacePodVerticalScaling\]`,
+-			`\[Feature:ServiceCIDRs\]`,
+ 			`\[Feature:ClusterTrustBundle\]`,
+ 			`\[Feature:SELinuxMount\]`,
+ 			`\[FeatureGate:SELinuxMount\]`,
+ 			`\[Feature:UserNamespacesPodSecurityStandards\]`,
+-			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
+ 			`\[Feature:DynamicResourceAllocation\]`,
+ 			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
+ 			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`, // Alpha feature since k8s 1.27
+ 			// 4.19
+ 			`\[Feature:PodLevelResources\]`,
+-			`\[Feature:SchedulerAsyncPreemption\]`,
+-			`\[Feature:RelaxedDNSSearchValidation\]`,
  			`\[Feature:PodLogsQuerySplitStreams\]`,
- 			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
+-			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
 +			`\[Feature:volumegroupsnapshot\]`, // disabled Beta
++			// 4.20
++			`\[Feature:OffByDefault\]`,
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -162,6 +163,9 @@ var (
+@@ -161,7 +158,10 @@ var (
+ 			`\[sig-node\] \[Feature:PodLifecycleSleepAction\] when create a pod with lifecycle hook using sleep action valid prestop hook using sleep action`,
  
  			// https://issues.redhat.com/browse/OCPBUGS-38839
- 			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
+-			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
++			`\[sig-network\] Traffic Distribution`,
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45273
 +			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -173,26 +177,6 @@ var (
- 
+@@ -174,25 +174,11 @@ var (
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
--
+ 
 -			// https://issues.redhat.com/browse/OCPBUGS-45214
 -			// Even though this feature is not GA in k/k, it will be GA in OCP 4.19, so we should fix it and unskip this test
 -			`\[Feature:volumegroupsnapshot\]`,
--
++			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743190159388209
++			`SELinuxMount`,
+ 
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
 -
@@ -696,6 +719,8 @@ index a62f99f1fd9..ccf0c71c738 100644
 -
 -			// https://issues.redhat.com/browse/OCPBUGS-46477
 -			`\[sig-storage\] In-tree Volumes \[Driver: azure-file\]`,
++			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743612984702079
++			`\[Feature:SchedulerAsyncPreemption\]`,
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
