@@ -1,4 +1,4 @@
-From 142732ec9f3a55818220bd6f7238ead0f1fd6b57 Mon Sep 17 00:00:00 2001
+From fc15f560589f254a64f57a3cacf0f9982deef8ad Mon Sep 17 00:00:00 2001
 From: Aravindh Puthiyaparambil <aravindh@redhat.com>
 Date: Wed, 12 Apr 2023 10:46:15 -0700
 Subject: [PATCH] UPSTREAM: <carry>: Extend NodeLogQuery feature
@@ -13,19 +13,19 @@ Fix handling of the "until" parameter when generating the journalctl
 command. This was incorrectly being passed with the "since" value.
 ---
  pkg/features/kube_features.go                 |   4 +-
- pkg/features/kube_features_test.go            |   1 +
+ pkg/features/kube_features_test.go            |   4 +
  .../apis/config/validation/validation_test.go |   2 +
  pkg/kubelet/kubelet.go                        |   7 +-
  pkg/kubelet/kubelet_server_journal.go         | 111 +++++++++++++++---
  pkg/kubelet/kubelet_server_journal_linux.go   |  23 +++-
  pkg/kubelet/kubelet_server_journal_test.go    |  53 ++++++---
  pkg/kubelet/kubelet_server_journal_windows.go |  13 +-
- .../cmd/feature_gates.go                      |   4 +-
+ .../cmd/feature_gates.go                      |   3 +
  .../reference/versioned_feature_list.yaml     |   4 +-
- 10 files changed, 173 insertions(+), 49 deletions(-)
+ 10 files changed, 177 insertions(+), 47 deletions(-)
 
 diff --git a/pkg/features/kube_features.go b/pkg/features/kube_features.go
-index 0236c23dd46..6b4d1a7ecd3 100644
+index b92deb5e7f9..62b8a40f96b 100644
 --- a/pkg/features/kube_features.go
 +++ b/pkg/features/kube_features.go
 @@ -1539,8 +1539,8 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
@@ -40,16 +40,19 @@ index 0236c23dd46..6b4d1a7ecd3 100644
  
  	NodeSwap: {
 diff --git a/pkg/features/kube_features_test.go b/pkg/features/kube_features_test.go
-index a73ce764c82..3967c294257 100644
+index 29a147b288a..3967c294257 100644
 --- a/pkg/features/kube_features_test.go
 +++ b/pkg/features/kube_features_test.go
-@@ -77,6 +77,7 @@ func TestEnsureAlphaGatesAreNotSwitchedOnByDefault(t *testing.T) {
+@@ -77,6 +77,10 @@ func TestEnsureAlphaGatesAreNotSwitchedOnByDefault(t *testing.T) {
  		if feature == "WindowsHostNetwork" {
  			return
  		}
 +		// OpenShift-specific
- 		if feature == "NodeLogQuery" {
- 			return
++		if feature == "NodeLogQuery" {
++			return
++		}
+ 		if spec.PreRelease == featuregate.Alpha && spec.Default {
+ 			t.Errorf("The alpha feature gate %q is switched on by default", feature)
  		}
 diff --git a/pkg/kubelet/apis/config/validation/validation_test.go b/pkg/kubelet/apis/config/validation/validation_test.go
 index 75fccec60ec..74cd96b31f7 100644
@@ -523,22 +526,21 @@ index ffe2df1772d..f55620de02f 100644
  	}
  
 diff --git a/test/compatibility_lifecycle/cmd/feature_gates.go b/test/compatibility_lifecycle/cmd/feature_gates.go
-index 638b96f85c1..b5ea9204d47 100644
+index f8833200e4f..b5ea9204d47 100644
 --- a/test/compatibility_lifecycle/cmd/feature_gates.go
 +++ b/test/compatibility_lifecycle/cmd/feature_gates.go
-@@ -267,8 +267,8 @@ func verifyFeatureRemoval(featureList []featureInfo, baseFeatureList []featureIn
- }
+@@ -268,6 +268,9 @@ func verifyFeatureRemoval(featureList []featureInfo, baseFeatureList []featureIn
  
  func verifyAlphaFeatures(featureList []featureInfo) error {
--	for featureName, f := range featureList {
--		if featureName == "NodeLogQuery" {
-+	for _, f := range featureList {
+ 	for _, f := range featureList {
 +		if f.Name == "NodeLogQuery" {
- 			continue
- 		}
++			continue
++		}
  		for _, spec := range f.VersionedSpecs {
+ 			if spec.PreRelease == "Alpha" && spec.Default {
+ 				return fmt.Errorf("alpha feature %s cannot be enabled by default", f.Name)
 diff --git a/test/compatibility_lifecycle/reference/versioned_feature_list.yaml b/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
-index fecd1142a72..04d517a9710 100644
+index 141f80d0c68..ed068c34f7e 100644
 --- a/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
 +++ b/test/compatibility_lifecycle/reference/versioned_feature_list.yaml
 @@ -935,11 +935,11 @@

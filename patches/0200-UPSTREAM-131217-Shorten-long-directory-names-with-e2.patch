@@ -1,0 +1,162 @@
+From 56151ffcb9fb66bc5fcc7c17e16cadbdca71fdeb Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Wed, 9 Apr 2025 09:36:57 -0300
+Subject: [PATCH] UPSTREAM: 131217: Shorten long directory names with e2e pod
+ logs
+
+---
+ test/e2e/storage/utils/file.go      | 41 +++++++++++++++++++++
+ test/e2e/storage/utils/file_test.go | 56 +++++++++++++++++++++++++++++
+ test/e2e/storage/utils/pod.go       | 10 ++++--
+ 3 files changed, 105 insertions(+), 2 deletions(-)
+ create mode 100644 test/e2e/storage/utils/file.go
+ create mode 100644 test/e2e/storage/utils/file_test.go
+
+diff --git a/test/e2e/storage/utils/file.go b/test/e2e/storage/utils/file.go
+new file mode 100644
+index 00000000000..a6a91331904
+--- /dev/null
++++ b/test/e2e/storage/utils/file.go
+@@ -0,0 +1,41 @@
++/*
++Copyright 2025 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package utils
++
++import (
++	"fmt"
++	"hash/crc32"
++)
++
++// The max length for ntfs, ext4, xfs and btrfs.
++const maxFileNameLength = 255
++
++// Shorten a file name to size allowed by the most common filesystems.
++// If the filename is too long, cut it + add a short hash (crc32) that makes it unique.
++// Note that the input should be a single file / directory name, not a path
++// composed of several directories.
++func ShortenFileName(filename string) string {
++	if len(filename) <= maxFileNameLength {
++		return filename
++	}
++
++	hash := crc32.ChecksumIEEE([]byte(filename))
++	hashString := fmt.Sprintf("%x", hash)
++	hashLen := len(hashString)
++
++	return fmt.Sprintf("%s-%s", filename[:maxFileNameLength-1-hashLen], hashString)
++}
+diff --git a/test/e2e/storage/utils/file_test.go b/test/e2e/storage/utils/file_test.go
+new file mode 100644
+index 00000000000..ff14a4cca87
+--- /dev/null
++++ b/test/e2e/storage/utils/file_test.go
+@@ -0,0 +1,56 @@
++/*
++Copyright 2025 The Kubernetes Authors.
++
++Licensed under the Apache License, Version 2.0 (the "License");
++you may not use this file except in compliance with the License.
++You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package utils
++
++import (
++	"testing"
++
++	"github.com/stretchr/testify/assert"
++)
++
++func TestShortenFileName(t *testing.T) {
++	const hashLength = 10
++	tests := []struct {
++		name     string
++		filename string
++		expected string
++	}{
++		{
++			name:     "Shorter than max length",
++			filename: "short file name",
++			expected: "short file name",
++		},
++		{
++			name:     "Longer than max length, truncated",
++			filename: "a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 characters..",
++			expected: "a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 characters a very long string that has exactly 256 ch-ad31f675",
++		},
++		{
++			name:     "Exactly max length, not truncated",
++			filename: "a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters.",
++			expected: "a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters a very long string that has exactly 255 characters.",
++		},
++	}
++
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			result := ShortenFileName(tt.filename)
++			assert.Equal(t, tt.expected, result)
++			assert.LessOrEqual(t, len(result), maxFileNameLength)
++		})
++	}
++}
+diff --git a/test/e2e/storage/utils/pod.go b/test/e2e/storage/utils/pod.go
+index 603f86e2ce8..a4d72721fad 100644
+--- a/test/e2e/storage/utils/pod.go
++++ b/test/e2e/storage/utils/pod.go
+@@ -22,8 +22,8 @@ import (
+ 	"io"
+ 	"os"
+ 	"path"
++	"path/filepath"
+ 	"regexp"
+-	"strings"
+ 
+ 	"github.com/onsi/ginkgo/v2"
+ 	"github.com/onsi/gomega"
+@@ -68,6 +68,12 @@ func StartPodLogs(ctx context.Context, f *framework.Framework, driverNamespace *
+ 				testName = append(testName, reg.ReplaceAllString(test.LeafNodeText, "_"))
+ 			}
+ 		}
++
++		// Make sure each directory name is short enough for Linux + Windows
++		for i, testNameComponent := range testName {
++			testName[i] = ShortenFileName(testNameComponent)
++		}
++
+ 		// We end the prefix with a slash to ensure that all logs
+ 		// end up in a directory named after the current test.
+ 		//
+@@ -76,7 +82,7 @@ func StartPodLogs(ctx context.Context, f *framework.Framework, driverNamespace *
+ 		// keeps each directory name smaller (the full test
+ 		// name at one point exceeded 256 characters, which was
+ 		// too much for some filesystems).
+-		logDir := framework.TestContext.ReportDir + "/" + strings.Join(testName, "/")
++		logDir := filepath.Join(framework.TestContext.ReportDir, filepath.Join(testName...))
+ 		to.LogPathPrefix = logDir + "/"
+ 
+ 		err := os.MkdirAll(logDir, 0755)
+-- 
+2.49.0
+

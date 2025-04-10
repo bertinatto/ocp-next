@@ -1,0 +1,26 @@
+From 84eed2d3b4b28ef66d97b2ab300662f38664733c Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 7 Apr 2025 08:14:25 -0300
+Subject: [PATCH] UPSTREAM: 131187: Update PodSecurityLevel used during Service
+ CIDRs tests
+
+---
+ test/e2e/network/service_cidrs.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/e2e/network/service_cidrs.go b/test/e2e/network/service_cidrs.go
+index 198c678db80..da92a347313 100644
+--- a/test/e2e/network/service_cidrs.go
++++ b/test/e2e/network/service_cidrs.go
+@@ -39,7 +39,7 @@ import (
+ var _ = common.SIGDescribe("Service CIDRs", func() {
+ 
+ 	fr := framework.NewDefaultFramework("servicecidrs")
+-	fr.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
++	fr.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
+ 
+ 	var (
+ 		cs clientset.Interface
+-- 
+2.49.0
+

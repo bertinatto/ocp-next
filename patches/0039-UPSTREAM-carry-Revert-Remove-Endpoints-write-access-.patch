@@ -1,4 +1,4 @@
-From 00fad2882b72d28c5549eaa5851ed887096dca59 Mon Sep 17 00:00:00 2001
+From ed9b49e01be3d3e56f12d1f8c65ab16af015a0f0 Mon Sep 17 00:00:00 2001
 From: Dan Winship <danwinship@redhat.com>
 Date: Mon, 23 Aug 2021 10:24:39 -0400
 Subject: [PATCH] UPSTREAM: <carry>: Revert "Remove Endpoints write access from
@@ -14,11 +14,12 @@ This reverts commit 416efdab26afe06cf2b57991dfac511769bf508b.
 OpenShift-Rebase-Source: 239b9edabbb
 ---
  plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go       | 2 +-
+ .../bootstrappolicy/testdata/cluster-roles-featuregates.yaml    | 1 +
  .../authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml | 1 +
- 2 files changed, 2 insertions(+), 1 deletion(-)
+ 3 files changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
-index fad0b52f9f4..333134c1f96 100644
+index f1f9b2402c2..1037ef0f0b4 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 +++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/policy.go
 @@ -155,7 +155,7 @@ func editRules() []rbacv1.PolicyRule {
@@ -30,6 +31,18 @@ index fad0b52f9f4..333134c1f96 100644
  		rbacv1helpers.NewRule("create").Groups(legacyGroup).Resources("serviceaccounts/token").RuleOrDie(),
  
  		rbacv1helpers.NewRule(Write...).Groups(appsGroup).Resources(
+diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles-featuregates.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles-featuregates.yaml
+index 987cb9130dc..abe8862526d 100644
+--- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles-featuregates.yaml
++++ b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles-featuregates.yaml
+@@ -134,6 +134,7 @@ items:
+     - ""
+     resources:
+     - configmaps
++    - endpoints
+     - events
+     - persistentvolumeclaims
+     - replicationcontrollers
 diff --git a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml b/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
 index bda30301f86..fc4edba1572 100644
 --- a/plugin/pkg/auth/authorizer/rbac/bootstrappolicy/testdata/cluster-roles.yaml
