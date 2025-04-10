@@ -1,16 +1,26 @@
-From fd8f46bdd87b991a6c6ee74ddbaa9bc81ce7bc63 Mon Sep 17 00:00:00 2001
+From d4fe21b5e24bb8308d69b39f77f61585b54a3342 Mon Sep 17 00:00:00 2001
 From: Abu Kashem <akashem@redhat.com>
 Date: Thu, 5 Sep 2024 12:57:33 -0400
 Subject: [PATCH] UPSTREAM: <carry>: annotate audit events for requests during
  unready phase and graceful termination phase
 
 This reverts commit 85f0f2ce7588ade986e7dd0b7b678d0c49b6eb73.
+
+UPSTREAM: <carry>: fix request Host storing in openshift.io/during-graceful audit log annotation
+
+request URL doesn't contain the host used in the request, instead it
+should be fetched from request headers
+
+Note for rebase: squash it into the following commit
+https://github.com/vrutkovs/kubernetes/commit/a83d289a900ab4095bf68fcf71c9b4d988780938 UPSTREAM: <carry>: annotate audit events for requests during unready phase and graceful termination phase (https://github.com/openshift/kubernetes/pull/2077)
+
+When audit message is being processed https://github.com/openshift/kubernetes/blob/309f240e18f1da87bbe86c18746774d6d302f8ef/staging/src/k8s.io/apimachinery/pkg/util/proxy/transport.go#L136-L174 may strip `Host` from `r.URL`, however `r.Host` is always filled in. This value may be different for proxy requests, but in most cases `r.Host` should be used instead of `r.URL.Host`
 ---
  .../k8s.io/apiserver/pkg/server/patch_genericapiserver.go    | 5 +++++
  1 file changed, 5 insertions(+)
 
 diff --git a/staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go b/staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
-index ac1ea0d7d42..a84494b1982 100644
+index ac1ea0d7d42..9d573823b24 100644
 --- a/staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
 +++ b/staging/src/k8s.io/apiserver/pkg/server/patch_genericapiserver.go
 @@ -32,6 +32,7 @@ import (
@@ -25,10 +35,10 @@ index ac1ea0d7d42..a84494b1982 100644
  		if late {
  			if pth := "/" + strings.TrimLeft(r.URL.Path, "/"); pth != "/readyz" && pth != "/healthz" && pth != "/livez" {
  				if isLocal(r) {
-+					audit.AddAuditAnnotation(r.Context(), "openshift.io/during-graceful", fmt.Sprintf("loopback=true,%v,readyz=false", r.URL.Host))
++					audit.AddAuditAnnotation(r.Context(), "openshift.io/during-graceful", fmt.Sprintf("loopback=true,%v,readyz=false", r.Host))
  					klog.V(4).Infof("Loopback request to %q (user agent %q) through connection created very late in the graceful termination process (more than 80%% has passed). This client probably does not watch /readyz and might get failures when termination is over.", r.URL.Path, r.UserAgent())
  				} else {
-+					audit.AddAuditAnnotation(r.Context(), "openshift.io/during-graceful", fmt.Sprintf("loopback=false,%v,readyz=false", r.URL.Host))
++					audit.AddAuditAnnotation(r.Context(), "openshift.io/during-graceful", fmt.Sprintf("loopback=false,%v,readyz=false", r.Host))
  					klog.Warningf("Request to %q (source IP %s, user agent %q) through a connection created very late in the graceful termination process (more than 80%% has passed), possibly a sign for a broken load balancer setup.", r.URL.Path, r.RemoteAddr, r.UserAgent())
  
  					// create only one event to avoid event spam.
@@ -45,5 +55,5 @@ index ac1ea0d7d42..a84494b1982 100644
  
  				// create only one event to avoid event spam.
 -- 
-2.47.1
+2.49.0
 

@@ -1,4 +1,4 @@
-From 01a95e761804d39a960942b2055b60bdcbbb9fba Mon Sep 17 00:00:00 2001
+From a22308abb4c2abf7d731fb231830dd24752404e5 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -8,22 +8,31 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .ci-operator.yaml                             |   2 +-
  DOWNSTREAM_OWNERS                             |   4 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
- .../cmd/k8s-tests-ext/disabled_tests.go       | 234 ++++++++++++++++++
- .../k8s-tests-ext/environment_selectors.go    | 230 +++++++++++++++++
+ hack/lib/golang.sh                            |   1 -
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 234 +++++++++++++++++
+ .../k8s-tests-ext/environment_selectors.go    | 235 ++++++++++++++++++
  openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- openshift-hack/e2e/annotate/rules.go          |  42 ++--
+ openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 --------
+ openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
+ openshift-hack/cmd/k8s-tests/runtest.go       | 143 -----------
+ openshift-hack/cmd/k8s-tests/types.go         |  69 -----
+ openshift-hack/e2e/annotate/rules.go          |  47 ++--
  openshift-hack/e2e/include.go                 |   1 -
- .../images/hyperkube/Dockerfile.rhel          |   4 +-
+ .../images/hyperkube/Dockerfile.rhel          |   8 +-
  .../Dockerfile.rhel                           |  10 +-
  .../images/kube-proxy/Dockerfile.rhel         |   2 +-
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
  openshift-hack/test-kubernetes-e2e.sh         |   1 +
- 15 files changed, 604 insertions(+), 40 deletions(-)
+ 20 files changed, 616 insertions(+), 500 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
+ delete mode 100644 openshift-hack/cmd/k8s-tests/k8s-tests.go
+ delete mode 100644 openshift-hack/cmd/k8s-tests/provider.go
+ delete mode 100644 openshift-hack/cmd/k8s-tests/runtest.go
+ delete mode 100644 openshift-hack/cmd/k8s-tests/types.go
 
 diff --git a/.ci-operator.yaml b/.ci-operator.yaml
 index 7c15f83e3e6..93022ee9763 100644
@@ -69,6 +78,18 @@ index 5dc852525b0..b16081a19ef 100644
  WORKDIR /go/src/github.com/openshift/kubernetes/build/pause
  COPY . .
  RUN mkdir -p bin && \
+diff --git a/hack/lib/golang.sh b/hack/lib/golang.sh
+index d8485b53b88..898ce1c0c52 100755
+--- a/hack/lib/golang.sh
++++ b/hack/lib/golang.sh
+@@ -79,7 +79,6 @@ kube::golang::server_targets() {
+     staging/src/k8s.io/apiextensions-apiserver
+     cluster/gce/gci/mounter
+     cmd/watch-termination
+-    openshift-hack/cmd/k8s-tests
+     openshift-hack/cmd/k8s-tests-ext
+   )
+   echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
 index 00000000000..503969ea82c
@@ -311,10 +332,10 @@ index 00000000000..503969ea82c
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go b/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
 new file mode 100644
-index 00000000000..7995fc7aad2
+index 00000000000..825b2e7a4a7
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,235 @@
 +package main
 +
 +import et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
@@ -430,6 +451,11 @@ index 00000000000..7995fc7aad2
 +			// LoadBalancer tests in 1.31 require explicit platform-specific skips
 +			// https://issues.redhat.com/browse/OCPBUGS-38840
 +			"[Feature:LoadBalancer]",
++		},
++		"external": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-53249
++			"[sig-network] LoadBalancers [Feature:LoadBalancer] should be able to preserve UDP traffic when server pod cycles for a LoadBalancer service on",
 +		},
 +	}
 +
@@ -695,8 +721,489 @@ index 00000000000..7932f2eb1b6
 +		specs.SelectAny(selectFunctions).AddLabel(label)
 +	}
 +}
+diff --git a/openshift-hack/cmd/k8s-tests/k8s-tests.go b/openshift-hack/cmd/k8s-tests/k8s-tests.go
+deleted file mode 100644
+index fedd8b16f01..00000000000
+--- a/openshift-hack/cmd/k8s-tests/k8s-tests.go
++++ /dev/null
+@@ -1,98 +0,0 @@
+-package main
+-
+-import (
+-	"encoding/json"
+-	"flag"
+-	"fmt"
+-	"math/rand"
+-	"os"
+-	"sort"
+-	"time"
+-
+-	"github.com/spf13/cobra"
+-	"github.com/spf13/pflag"
+-
+-	utilflag "k8s.io/component-base/cli/flag"
+-	"k8s.io/component-base/logs"
+-	"k8s.io/kubernetes/test/e2e/framework"
+-
+-	// initialize framework extensions
+-	_ "k8s.io/kubernetes/test/e2e/framework/debug/init"
+-	_ "k8s.io/kubernetes/test/e2e/framework/metrics/init"
+-)
+-
+-func main() {
+-	logs.InitLogs()
+-	defer logs.FlushLogs()
+-
+-	rand.Seed(time.Now().UTC().UnixNano())
+-
+-	pflag.CommandLine.SetNormalizeFunc(utilflag.WordSepNormalizeFunc)
+-
+-	root := &cobra.Command{
+-		Long: "OpenShift Tests compatible wrapper",
+-	}
+-
+-	root.AddCommand(
+-		newRunTestCommand(),
+-		newListTestsCommand(),
+-	)
+-
+-	f := flag.CommandLine.Lookup("v")
+-	root.PersistentFlags().AddGoFlag(f)
+-	pflag.CommandLine = pflag.NewFlagSet("empty", pflag.ExitOnError)
+-	flag.CommandLine = flag.NewFlagSet("empty", flag.ExitOnError)
+-	framework.RegisterCommonFlags(flag.CommandLine)
+-	framework.RegisterClusterFlags(flag.CommandLine)
+-
+-	if err := func() error {
+-		return root.Execute()
+-	}(); err != nil {
+-		if ex, ok := err.(ExitError); ok {
+-			fmt.Fprintf(os.Stderr, "Ginkgo exit error %d: %v\n", ex.Code, err)
+-			os.Exit(ex.Code)
+-		}
+-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+-		os.Exit(1)
+-	}
+-}
+-
+-func newRunTestCommand() *cobra.Command {
+-	testOpt := NewTestOptions(os.Stdout, os.Stderr)
+-
+-	cmd := &cobra.Command{
+-		Use:          "run-test NAME",
+-		Short:        "Run a single test by name",
+-		Long:         "Execute a single test.",
+-		SilenceUsage: true,
+-		RunE: func(cmd *cobra.Command, args []string) error {
+-			if err := initializeTestFramework(os.Getenv("TEST_PROVIDER")); err != nil {
+-				return err
+-			}
+-
+-			return testOpt.Run(args)
+-		},
+-	}
+-	return cmd
+-}
+-
+-func newListTestsCommand() *cobra.Command {
+-	cmd := &cobra.Command{
+-		Use:          "list",
+-		Short:        "List available tests",
+-		Long:         "List the available tests in this binary.",
+-		SilenceUsage: true,
+-		RunE: func(cmd *cobra.Command, args []string) error {
+-			tests := testsForSuite()
+-			sort.Slice(tests, func(i, j int) bool { return tests[i].Name < tests[j].Name })
+-			data, err := json.Marshal(tests)
+-			if err != nil {
+-				return err
+-			}
+-			fmt.Fprintf(os.Stdout, "%s\n", data)
+-			return nil
+-		},
+-	}
+-
+-	return cmd
+-}
+diff --git a/openshift-hack/cmd/k8s-tests/provider.go b/openshift-hack/cmd/k8s-tests/provider.go
+deleted file mode 100644
+index cdc948a45c6..00000000000
+--- a/openshift-hack/cmd/k8s-tests/provider.go
++++ /dev/null
+@@ -1,147 +0,0 @@
+-package main
+-
+-import (
+-	"context"
+-	"encoding/json"
+-	"fmt"
+-	"os"
+-	"path/filepath"
+-	"strings"
+-
+-	"github.com/onsi/ginkgo/v2"
+-	"github.com/onsi/gomega"
+-
+-	corev1 "k8s.io/api/core/v1"
+-	kclientset "k8s.io/client-go/kubernetes"
+-	"k8s.io/client-go/tools/clientcmd"
+-	"k8s.io/kubernetes/openshift-hack/e2e"
+-	conformancetestdata "k8s.io/kubernetes/test/conformance/testdata"
+-	"k8s.io/kubernetes/test/e2e/framework"
+-	"k8s.io/kubernetes/test/e2e/framework/testfiles"
+-	"k8s.io/kubernetes/test/e2e/storage/external"
+-	e2etestingmanifests "k8s.io/kubernetes/test/e2e/testing-manifests"
+-	testfixtures "k8s.io/kubernetes/test/fixtures"
+-
+-	// this appears to inexplicably auto-register global flags.
+-	_ "k8s.io/kubernetes/test/e2e/storage/drivers"
+-
+-	// these are loading important global flags that we need to get and set
+-	_ "k8s.io/kubernetes/test/e2e"
+-	_ "k8s.io/kubernetes/test/e2e/lifecycle"
+-)
+-
+-// copied directly from github.com/openshift/origin/cmd/openshift-tests/provider.go
+-// and github.com/openshift/origin/test/extended/util/test.go
+-func initializeTestFramework(provider string) error {
+-	providerInfo := &ClusterConfiguration{}
+-	if err := json.Unmarshal([]byte(provider), &providerInfo); err != nil {
+-		return fmt.Errorf("provider must be a JSON object with the 'type' key at a minimum: %v", err)
+-	}
+-	if len(providerInfo.ProviderName) == 0 {
+-		return fmt.Errorf("provider must be a JSON object with the 'type' key")
+-	}
+-	config := &ClusterConfiguration{}
+-	if err := json.Unmarshal([]byte(provider), config); err != nil {
+-		return fmt.Errorf("provider must decode into the ClusterConfig object: %v", err)
+-	}
+-
+-	// update testContext with loaded config
+-	testContext := &framework.TestContext
+-	testContext.Provider = config.ProviderName
+-	testContext.CloudConfig = framework.CloudConfig{
+-		ProjectID:   config.ProjectID,
+-		Region:      config.Region,
+-		Zone:        config.Zone,
+-		Zones:       config.Zones,
+-		NumNodes:    config.NumNodes,
+-		MultiMaster: config.MultiMaster,
+-		MultiZone:   config.MultiZone,
+-		ConfigFile:  config.ConfigFile,
+-	}
+-	testContext.AllowedNotReadyNodes = -1
+-	testContext.MinStartupPods = -1
+-	testContext.MaxNodesToGather = 0
+-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
+-
+-	// allow the CSI tests to access test data, but only briefly
+-	// TODO: ideally CSI would not use any of these test methods
+-	// var err error
+-	// exutil.WithCleanup(func() { err = initCSITests(dryRun) })
+-	// TODO: for now I'm only initializing CSI directly, but we probably need that
+-	// WithCleanup here as well
+-	if err := initCSITests(); err != nil {
+-		return err
+-	}
+-
+-	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
+-		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
+-	}
+-
+-	testContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
+-	testContext.VerifyServiceAccount = true
+-	testfiles.AddFileSource(e2etestingmanifests.GetE2ETestingManifestsFS())
+-	testfiles.AddFileSource(testfixtures.GetTestFixturesFS())
+-	testfiles.AddFileSource(conformancetestdata.GetConformanceTestdataFS())
+-	testContext.KubectlPath = "kubectl"
+-	// context.KubeConfig = KubeConfigPath()
+-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
+-
+-	// "debian" is used when not set. At least GlusterFS tests need "custom".
+-	// (There is no option for "rhel" or "centos".)
+-	testContext.NodeOSDistro = "custom"
+-	testContext.MasterOSDistro = "custom"
+-
+-	// load and set the host variable for kubectl
+-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: testContext.KubeConfig}, &clientcmd.ConfigOverrides{})
+-	cfg, err := clientConfig.ClientConfig()
+-	if err != nil {
+-		return err
+-	}
+-	testContext.Host = cfg.Host
+-
+-	// Ensure that Kube tests run privileged (like they do upstream)
+-	testContext.CreateTestingNS = func(ctx context.Context, baseName string, c kclientset.Interface, labels map[string]string) (*corev1.Namespace, error) {
+-		return e2e.CreateTestingNS(ctx, baseName, c, labels, true)
+-	}
+-
+-	gomega.RegisterFailHandler(ginkgo.Fail)
+-
+-	framework.AfterReadingAllFlags(testContext)
+-	testContext.DumpLogsOnFailure = true
+-
+-	// these constants are taken from kube e2e and used by tests
+-	testContext.IPFamily = "ipv4"
+-	if config.HasIPv6 && !config.HasIPv4 {
+-		testContext.IPFamily = "ipv6"
+-	}
+-
+-	testContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
+-
+-	return nil
+-}
+-
+-const (
+-	manifestEnvVar = "TEST_CSI_DRIVER_FILES"
+-)
+-
+-// copied directly from github.com/openshift/origin/cmd/openshift-tests/csi.go
+-// Initialize openshift/csi suite, i.e. define CSI tests from TEST_CSI_DRIVER_FILES.
+-func initCSITests() error {
+-	manifestList := os.Getenv(manifestEnvVar)
+-	if manifestList != "" {
+-		manifests := strings.Split(manifestList, ",")
+-		for _, manifest := range manifests {
+-			if err := external.AddDriverDefinition(manifest); err != nil {
+-				return fmt.Errorf("failed to load manifest from %q: %s", manifest, err)
+-			}
+-			// Register the base dir of the manifest file as a file source.
+-			// With this we can reference the CSI driver's storageClass
+-			// in the manifest file (FromFile field).
+-			testfiles.AddFileSource(testfiles.RootFileSource{
+-				Root: filepath.Dir(manifest),
+-			})
+-		}
+-	}
+-
+-	return nil
+-}
+diff --git a/openshift-hack/cmd/k8s-tests/runtest.go b/openshift-hack/cmd/k8s-tests/runtest.go
+deleted file mode 100644
+index 0abff33438f..00000000000
+--- a/openshift-hack/cmd/k8s-tests/runtest.go
++++ /dev/null
+@@ -1,143 +0,0 @@
+-package main
+-
+-import (
+-	"fmt"
+-	"io"
+-	"os"
+-	"regexp"
+-	"strings"
+-	"time"
+-
+-	"github.com/onsi/ginkgo/v2"
+-	"github.com/onsi/ginkgo/v2/types"
+-
+-	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
+-
+-	// ensure all the ginkgo tests are loaded
+-	_ "k8s.io/kubernetes/openshift-hack/e2e"
+-)
+-
+-// TestOptions handles running a single test.
+-type TestOptions struct {
+-	Out    io.Writer
+-	ErrOut io.Writer
+-}
+-
+-var _ ginkgo.GinkgoTestingT = &TestOptions{}
+-
+-func NewTestOptions(out io.Writer, errOut io.Writer) *TestOptions {
+-	return &TestOptions{
+-		Out:    out,
+-		ErrOut: errOut,
+-	}
+-}
+-
+-func (opt *TestOptions) Run(args []string) error {
+-	if len(args) != 1 {
+-		return fmt.Errorf("only a single test name may be passed")
+-	}
+-
+-	// Ignore the upstream suite behavior within test execution
+-	ginkgo.GetSuite().ClearBeforeAndAfterSuiteNodes()
+-	tests := testsForSuite()
+-	var test *TestCase
+-	for _, t := range tests {
+-		if t.Name == args[0] {
+-			test = t
+-			break
+-		}
+-	}
+-	if test == nil {
+-		return fmt.Errorf("no test exists with that name: %s", args[0])
+-	}
+-
+-	suiteConfig, reporterConfig := ginkgo.GinkgoConfiguration()
+-	suiteConfig.FocusStrings = []string{fmt.Sprintf("^ %s$", regexp.QuoteMeta(test.Name))}
+-
+-	// These settings are matched to upstream's ginkgo configuration. See:
+-	// https://github.com/kubernetes/kubernetes/blob/v1.25.0/test/e2e/framework/test_context.go#L354-L355
+-	// Randomize specs as well as suites
+-	suiteConfig.RandomizeAllSpecs = true
+-	// https://github.com/kubernetes/kubernetes/blob/v1.25.0/hack/ginkgo-e2e.sh#L172-L173
+-	suiteConfig.Timeout = 24 * time.Hour
+-	reporterConfig.NoColor = true
+-	reporterConfig.Verbose = true
+-
+-	ginkgo.SetReporterConfig(reporterConfig)
+-
+-	cwd, err := os.Getwd()
+-	if err != nil {
+-		return err
+-	}
+-	ginkgo.GetSuite().RunSpec(test.spec, ginkgo.Labels{}, "Kubernetes e2e suite", cwd, ginkgo.GetFailer(), ginkgo.GetWriter(), suiteConfig, reporterConfig)
+-
+-	var summary types.SpecReport
+-	for _, report := range ginkgo.GetSuite().GetReport().SpecReports {
+-		if report.NumAttempts > 0 {
+-			summary = report
+-		}
+-	}
+-
+-	switch {
+-	case summary.State == types.SpecStatePassed:
+-		// do nothing
+-	case summary.State == types.SpecStateSkipped:
+-		if len(summary.Failure.Message) > 0 {
+-			fmt.Fprintf(opt.ErrOut, "skip [%s:%d]: %s\n", lastFilenameSegment(summary.Failure.Location.FileName), summary.Failure.Location.LineNumber, summary.Failure.Message)
+-		}
+-		if len(summary.Failure.ForwardedPanic) > 0 {
+-			fmt.Fprintf(opt.ErrOut, "skip [%s:%d]: %s\n", lastFilenameSegment(summary.Failure.Location.FileName), summary.Failure.Location.LineNumber, summary.Failure.ForwardedPanic)
+-		}
+-		return ExitError{Code: 3}
+-	case summary.State == types.SpecStateFailed, summary.State == types.SpecStatePanicked, summary.State == types.SpecStateInterrupted:
+-		if len(summary.Failure.ForwardedPanic) > 0 {
+-			if len(summary.Failure.Location.FullStackTrace) > 0 {
+-				fmt.Fprintf(opt.ErrOut, "\n%s\n", summary.Failure.Location.FullStackTrace)
+-			}
+-			fmt.Fprintf(opt.ErrOut, "fail [%s:%d]: Test Panicked: %s\n", lastFilenameSegment(summary.Failure.Location.FileName), summary.Failure.Location.LineNumber, summary.Failure.ForwardedPanic)
+-			return ExitError{Code: 1}
+-		}
+-		fmt.Fprintf(opt.ErrOut, "fail [%s:%d]: %s\n", lastFilenameSegment(summary.Failure.Location.FileName), summary.Failure.Location.LineNumber, summary.Failure.Message)
+-		return ExitError{Code: 1}
+-	default:
+-		return fmt.Errorf("unrecognized test case outcome: %#v", summary)
+-	}
+-	return nil
+-}
+-
+-func (opt *TestOptions) Fail() {
+-	// this function allows us to pass TestOptions as the first argument,
+-	// it's empty becase we have failure check mechanism implemented above.
+-}
+-
+-func lastFilenameSegment(filename string) string {
+-	if parts := strings.Split(filename, "/vendor/"); len(parts) > 1 {
+-		return parts[len(parts)-1]
+-	}
+-	if parts := strings.Split(filename, "/src/"); len(parts) > 1 {
+-		return parts[len(parts)-1]
+-	}
+-	return filename
+-}
+-
+-func testsForSuite() []*TestCase {
+-	var tests []*TestCase
+-
+-	// Don't build the tree multiple times, it results in multiple initing of tests
+-	if !ginkgo.GetSuite().InPhaseBuildTree() {
+-		ginkgo.GetSuite().BuildTree()
+-	}
+-
+-	ginkgo.GetSuite().WalkTests(func(name string, spec types.TestSpec) {
+-		testCase := &TestCase{
+-			Name:      spec.Text(),
+-			locations: spec.CodeLocations(),
+-			spec:      spec,
+-		}
+-		if labels, ok := generated.Annotations[name]; ok {
+-			testCase.Labels = labels
+-		}
+-		tests = append(tests, testCase)
+-	})
+-	return tests
+-}
+diff --git a/openshift-hack/cmd/k8s-tests/types.go b/openshift-hack/cmd/k8s-tests/types.go
+deleted file mode 100644
+index 29a0b5b5efa..00000000000
+--- a/openshift-hack/cmd/k8s-tests/types.go
++++ /dev/null
+@@ -1,69 +0,0 @@
+-package main
+-
+-import (
+-	"fmt"
+-
+-	"github.com/onsi/ginkgo/v2/types"
+-)
+-
+-// copied directly from github.com/openshift/origin/test/extended/util/cluster/cluster.go
+-type ClusterConfiguration struct {
+-	ProviderName string `json:"type"`
+-
+-	// These fields (and the "type" tag for ProviderName) chosen to match
+-	// upstream's e2e.CloudConfig.
+-	ProjectID   string
+-	Region      string
+-	Zone        string
+-	NumNodes    int
+-	MultiMaster bool
+-	MultiZone   bool
+-	Zones       []string
+-	ConfigFile  string
+-
+-	// Disconnected is set for test jobs without external internet connectivity
+-	Disconnected bool
+-
+-	// SingleReplicaTopology is set for disabling disruptive tests or tests
+-	// that require high availability
+-	SingleReplicaTopology bool
+-
+-	// NetworkPlugin is the "official" plugin name
+-	NetworkPlugin string
+-	// NetworkPluginMode is an optional sub-identifier for the NetworkPlugin.
+-	// (Currently it is only used for OpenShiftSDN.)
+-	NetworkPluginMode string `json:",omitempty"`
+-
+-	// HasIPv4 and HasIPv6 determine whether IPv4-specific, IPv6-specific,
+-	// and dual-stack-specific tests are run
+-	HasIPv4 bool
+-	HasIPv6 bool
+-
+-	// HasSCTP determines whether SCTP connectivity tests can be run in the cluster
+-	HasSCTP bool
+-
+-	// IsProxied determines whether we are accessing the cluster through an HTTP proxy
+-	IsProxied bool
+-
+-	// IsIBMROKS determines whether the cluster is Managed IBM Cloud (ROKS)
+-	IsIBMROKS bool
+-
+-	// IsNoOptionalCapabilities indicates the cluster has no optional capabilities enabled
+-	HasNoOptionalCapabilities bool
+-}
+-
+-// copied directly from github.com/openshift/origin/pkg/test/ginkgo/test.go
+-type TestCase struct {
+-	Name      string
+-	Labels    string
+-	spec      types.TestSpec
+-	locations []types.CodeLocation
+-}
+-
+-type ExitError struct {
+-	Code int
+-}
+-
+-func (e ExitError) Error() string {
+-	return fmt.Sprintf("exit with code %d", e.Code)
+-}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..89f4c4657e8 100644
+index a62f99f1fd9..53389ffa8f1 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -10,22 +10,18 @@ var (
@@ -776,6 +1283,18 @@ index a62f99f1fd9..89f4c4657e8 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
+@@ -262,6 +260,11 @@ var (
+ 			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
+ 			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
+ 		},
++		"[Skipped:external]": {
++			// LoadBalancer tests in 1.31 require explicit platform-specific skips
++			// https://issues.redhat.com/browse/OCPBUGS-53249
++			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] should be able to preserve UDP traffic when server pod cycles for a LoadBalancer service on`,
++		},
+ 		"[Skipped:azure]": {
+ 			"Networking should provide Internet connection for containers", // Azure does not allow ICMP traffic to internet.
+ 			// Azure CSI migration changed how we treat regions without zones.
 diff --git a/openshift-hack/e2e/include.go b/openshift-hack/e2e/include.go
 index 48efbca4a3e..e0b481a17f0 100644
 --- a/openshift-hack/e2e/include.go
@@ -789,15 +1308,23 @@ index 48efbca4a3e..e0b481a17f0 100644
  	// test sources
  	_ "k8s.io/kubernetes/test/e2e/apimachinery"
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
-index fabdce0b9c0..c5b165e4833 100644
+index fabdce0b9c0..22c75dcaacb 100644
 --- a/openshift-hack/images/hyperkube/Dockerfile.rhel
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
-@@ -1,4 +1,4 @@
+@@ -1,10 +1,10 @@
 -FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
 +FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
  WORKDIR /go/src/k8s.io/kubernetes
  COPY . .
- RUN make WHAT='cmd/kube-apiserver cmd/kube-controller-manager cmd/kube-scheduler cmd/kubelet cmd/watch-termination openshift-hack/cmd/k8s-tests openshift-hack/cmd/k8s-tests-ext' && \
+-RUN make WHAT='cmd/kube-apiserver cmd/kube-controller-manager cmd/kube-scheduler cmd/kubelet cmd/watch-termination openshift-hack/cmd/k8s-tests openshift-hack/cmd/k8s-tests-ext' && \
++RUN make WHAT='cmd/kube-apiserver cmd/kube-controller-manager cmd/kube-scheduler cmd/kubelet cmd/watch-termination openshift-hack/cmd/k8s-tests-ext' && \
+     mkdir -p /tmp/build && \
+     cp openshift-hack/images/hyperkube/hyperkube openshift-hack/images/hyperkube/kubensenter /tmp/build && \
+-    cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/{kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,watch-termination,k8s-tests,k8s-tests-ext} \
++    cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/{kube-apiserver,kube-controller-manager,kube-scheduler,kubelet,watch-termination,k8s-tests-ext} \
+     /tmp/build && \
+     gzip /tmp/build/k8s-tests-ext
+ 
 @@ -14,4 +14,4 @@ COPY --from=builder /tmp/build/* /usr/bin/
  LABEL io.k8s.display-name="OpenShift Kubernetes Server Commands" \
        io.k8s.description="OpenShift is a platform for developing, building, and deploying containerized applications." \

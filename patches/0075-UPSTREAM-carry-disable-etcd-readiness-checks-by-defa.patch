@@ -1,0 +1,125 @@
+From b74cfcd9915ed391b38e7428f87c61bf924970b7 Mon Sep 17 00:00:00 2001
+From: Jan Chaloupka <jchaloup@redhat.com>
+Date: Thu, 16 Jan 2025 14:02:34 +0100
+Subject: [PATCH] UPSTREAM: <carry>: disable etcd readiness checks by default
+
+Explicitly exclude etcd and etcd-readiness checks (OCPBUGS-48177)
+and have etcd operator take responsibility for properly reporting etcd readiness.
+Justification: kube-apiserver instances get removed from a load balancer when etcd starts
+to report not ready (as will KA's /readyz). Client connections can withstand etcd unreadiness
+longer than the readiness timeout is. Thus, it is not necessary to drop connections
+in case etcd resumes its readiness before a client connection times out naturally.
+This is a downstream patch only as OpenShift's way of using etcd is unique.
+---
+ .../src/k8s.io/apiserver/pkg/server/config.go | 18 ++++++++++++++++--
+ .../apiserver/pkg/server/options/etcd.go      |  2 +-
+ .../apiserver/pkg/server/options/etcd_test.go | 19 +++++++++++++++++--
+ test/e2e/apimachinery/health_handlers.go      |  1 -
+ 4 files changed, 34 insertions(+), 6 deletions(-)
+
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/config.go b/staging/src/k8s.io/apiserver/pkg/server/config.go
+index b8f4241fec7..baa109dbb64 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/config.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/config.go
+@@ -586,13 +586,27 @@ type CompletedConfig struct {
+ func (c *Config) AddHealthChecks(healthChecks ...healthz.HealthChecker) {
+ 	c.HealthzChecks = append(c.HealthzChecks, healthChecks...)
+ 	c.LivezChecks = append(c.LivezChecks, healthChecks...)
+-	c.ReadyzChecks = append(c.ReadyzChecks, healthChecks...)
++	c.AddReadyzChecks(healthChecks...)
+ }
+ 
+ // AddReadyzChecks adds a health check to our config to be exposed by the readyz endpoint
+ // of our configured apiserver.
+ func (c *Config) AddReadyzChecks(healthChecks ...healthz.HealthChecker) {
+-	c.ReadyzChecks = append(c.ReadyzChecks, healthChecks...)
++	// Info(ingvagabund): Explicitly exclude etcd and etcd-readiness checks (OCPBUGS-48177)
++	// and have etcd operator take responsibility for properly reporting etcd readiness.
++	// Justification: kube-apiserver instances get removed from a load balancer when etcd starts
++	// to report not ready (as will KA's /readyz). Client connections can withstand etcd unreadiness
++	// longer than the readiness timeout is. Thus, it is not necessary to drop connections
++	// in case etcd resumes its readiness before a client connection times out naturally.
++	// This is a downstream patch only as OpenShift's way of using etcd is unique.
++	readyzChecks := []healthz.HealthChecker{}
++	for _, check := range healthChecks {
++		if check.Name() == "etcd" || check.Name() == "etcd-readiness" {
++			continue
++		}
++		readyzChecks = append(readyzChecks, check)
++	}
++	c.ReadyzChecks = append(c.ReadyzChecks, readyzChecks...)
+ }
+ 
+ // AddPostStartHook allows you to add a PostStartHook that will later be added to the server itself in a New call.
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/etcd.go b/staging/src/k8s.io/apiserver/pkg/server/options/etcd.go
+index af7696c40ae..1eeeca86056 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/options/etcd.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/options/etcd.go
+@@ -355,7 +355,7 @@ func (s *EtcdOptions) maybeApplyResourceTransformers(c *server.Config) (err erro
+ 
+ func addHealthChecksWithoutLivez(c *server.Config, healthChecks ...healthz.HealthChecker) {
+ 	c.HealthzChecks = append(c.HealthzChecks, healthChecks...)
+-	c.ReadyzChecks = append(c.ReadyzChecks, healthChecks...)
++	c.AddReadyzChecks(healthChecks...)
+ }
+ 
+ func (s *EtcdOptions) addEtcdHealthEndpoint(c *server.Config) error {
+diff --git a/staging/src/k8s.io/apiserver/pkg/server/options/etcd_test.go b/staging/src/k8s.io/apiserver/pkg/server/options/etcd_test.go
+index ea4464b24f8..576dc27f1d3 100644
+--- a/staging/src/k8s.io/apiserver/pkg/server/options/etcd_test.go
++++ b/staging/src/k8s.io/apiserver/pkg/server/options/etcd_test.go
+@@ -262,6 +262,17 @@ func TestParseWatchCacheSizes(t *testing.T) {
+ 	}
+ }
+ 
++func excludeEtcdReadyzChecks(readyzChecks []string) []string {
++	includedReadyzChecks := []string{}
++	for _, checkName := range readyzChecks {
++		if checkName == "etcd" || checkName == "etcd-readiness" {
++			continue
++		}
++		includedReadyzChecks = append(includedReadyzChecks, checkName)
++	}
++	return includedReadyzChecks
++}
++
+ func TestKMSHealthzEndpoint(t *testing.T) {
+ 	featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.KMSv1, true)
+ 
+@@ -367,7 +378,9 @@ func TestKMSHealthzEndpoint(t *testing.T) {
+ 			}
+ 
+ 			healthChecksAreEqual(t, tc.wantHealthzChecks, serverConfig.HealthzChecks, "healthz")
+-			healthChecksAreEqual(t, tc.wantReadyzChecks, serverConfig.ReadyzChecks, "readyz")
++			// Remove the excluded checks here to reduce the carry patch changes in case
++			// the changes drifts too much during rebases and similar scope-like changes.
++			healthChecksAreEqual(t, excludeEtcdReadyzChecks(tc.wantReadyzChecks), serverConfig.ReadyzChecks, "readyz")
+ 			healthChecksAreEqual(t, tc.wantLivezChecks, serverConfig.LivezChecks, "livez")
+ 		})
+ 	}
+@@ -407,7 +420,9 @@ func TestReadinessCheck(t *testing.T) {
+ 				t.Fatalf("Failed to add healthz error: %v", err)
+ 			}
+ 
+-			healthChecksAreEqual(t, tc.wantReadyzChecks, serverConfig.ReadyzChecks, "readyz")
++			// Remove the excluded checks here to reduce the carry patch changes in case
++			// the changes drifts too much during rebases and similar scope-like changes.
++			healthChecksAreEqual(t, excludeEtcdReadyzChecks(tc.wantReadyzChecks), serverConfig.ReadyzChecks, "readyz")
+ 			healthChecksAreEqual(t, tc.wantHealthzChecks, serverConfig.HealthzChecks, "healthz")
+ 			healthChecksAreEqual(t, tc.wantLivezChecks, serverConfig.LivezChecks, "livez")
+ 		})
+diff --git a/test/e2e/apimachinery/health_handlers.go b/test/e2e/apimachinery/health_handlers.go
+index ea19569516a..2d0ba533068 100644
+--- a/test/e2e/apimachinery/health_handlers.go
++++ b/test/e2e/apimachinery/health_handlers.go
+@@ -82,7 +82,6 @@ var (
+ 	requiredReadyzChecks = sets.NewString(
+ 		"[+]ping ok",
+ 		"[+]log ok",
+-		"[+]etcd ok",
+ 		"[+]informer-sync ok",
+ 		"[+]poststarthook/start-apiserver-admission-initializer ok",
+ 		"[+]poststarthook/generic-apiserver-start-informers ok",
+-- 
+2.49.0
+

@@ -112,7 +112,7 @@ func (g *GitWrapper) Clean() error {
 	if err := g.runGit("reset", "--hard"); err != nil {
 		return err
 	}
-	return g.runGit("clean", "-fdx")
+	return g.runGit("clean", "-fd")
 }
 
 func (g *GitWrapper) Fetch(remote, branch string) error {

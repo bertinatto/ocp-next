@@ -1,0 +1,33 @@
+From 45daef72d09b180d2c438c8440a53f99cdfab0d0 Mon Sep 17 00:00:00 2001
+From: ehila <ehila@redhat.com>
+Date: Sat, 12 Oct 2024 23:28:58 -0400
+Subject: [PATCH] UPSTREAM: <carry>: add arbiter node role to known labels
+
+Signed-off-by: ehila <ehila@redhat.com>
+---
+ .../src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go  | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go b/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
+index 9535c1702c1..ade33b7f831 100644
+--- a/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
++++ b/staging/src/k8s.io/kubelet/pkg/apis/well_known_openshift_labels.go
+@@ -24,6 +24,7 @@ const (
+ 	NodeLabelControlPlane = "node-role.kubernetes.io/control-plane"
+ 	NodeLabelMaster       = "node-role.kubernetes.io/master"
+ 	NodeLabelWorker       = "node-role.kubernetes.io/worker"
++	NodeLabelArbiter      = "node-role.kubernetes.io/arbiter"
+ 	NodeLabelEtcd         = "node-role.kubernetes.io/etcd"
+ )
+ 
+@@ -32,6 +33,7 @@ var openshiftNodeLabels = sets.NewString(
+ 	NodeLabelMaster,
+ 	NodeLabelWorker,
+ 	NodeLabelEtcd,
++	NodeLabelArbiter,
+ )
+ 
+ func OpenShiftNodeLabels() []string {
+-- 
+2.49.0
+
