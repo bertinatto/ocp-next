@@ -1,4 +1,4 @@
-From 783190eee98107ad1a1d03db38caf70e676f6bea Mon Sep 17 00:00:00 2001
+From 2f442048c00c027bf478e0edff75e920f178c13e Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -9,15 +9,15 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  DOWNSTREAM_OWNERS                             |   4 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
  hack/lib/golang.sh                            |   1 -
- .../cmd/k8s-tests-ext/disabled_tests.go       | 238 ++++++++++++++++++
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 239 ++++++++++++++++++
  .../k8s-tests-ext/environment_selectors.go    | 235 +++++++++++++++++
  openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 --------
+ openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 -------
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 -----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  49 ++--
+ openshift-hack/e2e/annotate/rules.go          |  50 ++--
  openshift-hack/e2e/include.go                 |   1 -
  .../images/hyperkube/Dockerfile.rhel          |   8 +-
  .../Dockerfile.rhel                           |  10 +-
@@ -25,7 +25,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
  openshift-hack/test-kubernetes-e2e.sh         |   1 +
- 20 files changed, 623 insertions(+), 499 deletions(-)
+ 20 files changed, 625 insertions(+), 499 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -92,10 +92,10 @@ index d8485b53b88..898ce1c0c52 100755
    echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..c6f7cba7495
+index 00000000000..3f9f442cb73
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
-@@ -0,0 +1,238 @@
+@@ -0,0 +1,239 @@
 +package main
 +
 +import (
@@ -120,6 +120,7 @@ index 00000000000..c6f7cba7495
 +			"[Feature:PodLogsQuerySplitStreams]",
 +			// 4.20
 +			"[Feature:OffByDefault]",
++			"[Feature:CBOR]",
 +		},
 +		// tests for features that are not implemented in openshift
 +		"Unimplemented": {
@@ -1207,10 +1208,10 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..da40a026758 100644
+index a62f99f1fd9..1911e1146c1 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -10,22 +10,18 @@ var (
+@@ -10,22 +10,19 @@ var (
  		// alpha features that are not gated
  		"[Disabled:Alpha]": {
  			`\[Feature:StorageVersionAPI\]`,
@@ -1232,10 +1233,11 @@ index a62f99f1fd9..da40a026758 100644
 -			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
 +			// 4.20
 +			`\[Feature:OffByDefault\]`,
++			`\[Feature:CBOR\]`,
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -161,7 +157,10 @@ var (
+@@ -161,7 +158,10 @@ var (
  			`\[sig-node\] \[Feature:PodLifecycleSleepAction\] when create a pod with lifecycle hook using sleep action valid prestop hook using sleep action`,
  
  			// https://issues.redhat.com/browse/OCPBUGS-38839
@@ -1247,7 +1249,7 @@ index a62f99f1fd9..da40a026758 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -174,25 +173,28 @@ var (
+@@ -174,25 +174,28 @@ var (
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
  
@@ -1290,7 +1292,7 @@ index a62f99f1fd9..da40a026758 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +264,11 @@ var (
+@@ -262,6 +265,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
