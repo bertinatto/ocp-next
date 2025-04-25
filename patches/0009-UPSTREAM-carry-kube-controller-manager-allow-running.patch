@@ -1,4 +1,4 @@
-From e074a2716930c5aab69478761aa6a4f868d5e7f6 Mon Sep 17 00:00:00 2001
+From 039ac937c2e1eeaebc6cd2d58b2b868161db9866 Mon Sep 17 00:00:00 2001
 From: David Eads <deads@redhat.com>
 Date: Thu, 29 Oct 2020 13:55:56 +0100
 Subject: [PATCH] UPSTREAM: <carry>: kube-controller-manager: allow running
@@ -40,10 +40,11 @@ blocks deletion indifinetelly as GC will ignore these resources.
  cmd/kube-controller-manager/app/patch_gc.go   |  37 +++
  .../app/patch_informers_openshift.go          | 293 ++++++++++++++++++
  .../app/patch_satoken.go                      |  87 ++++++
- pkg/controller/daemon/daemon_controller.go    |  17 +-
+ pkg/controller/daemon/daemon_controller.go    |  19 +-
  pkg/controller/daemon/patch_nodeselector.go   | 109 +++++++
  .../daemon/patch_nodeselector_test.go         | 186 +++++++++++
- 12 files changed, 848 insertions(+), 8 deletions(-)
+ pkg/controller/daemon/update.go               |   6 +-
+ 13 files changed, 852 insertions(+), 12 deletions(-)
  create mode 100644 cmd/kube-controller-manager/app/config/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch.go
  create mode 100644 cmd/kube-controller-manager/app/patch_gc.go
@@ -716,7 +717,7 @@ index 00000000000..82f1bb9b3ff
 +	return nil
 +}
 diff --git a/pkg/controller/daemon/daemon_controller.go b/pkg/controller/daemon/daemon_controller.go
-index 4db3a5933d9..fe03727a51e 100644
+index 4db3a5933d9..6aad2ace517 100644
 --- a/pkg/controller/daemon/daemon_controller.go
 +++ b/pkg/controller/daemon/daemon_controller.go
 @@ -122,7 +122,13 @@ type DaemonSetsController struct {
@@ -764,6 +765,15 @@ index 4db3a5933d9..fe03727a51e 100644
  		scheduled := len(nodeToDaemonPods[node.Name]) > 0
  
  		if shouldRun {
+@@ -1460,7 +1471,7 @@ func (dsc *DaemonSetsController) syncNodeUpdate(ctx context.Context, nodeName st
+ 	}
+ 
+ 	for _, ds := range dsList {
+-		shouldRun, shouldContinueRunning := NodeShouldRunDaemonPod(node, ds)
++		shouldRun, shouldContinueRunning := dsc.nodeShouldRunDaemonPod(node, ds)
+ 
+ 		dsKey, err := controller.KeyFunc(ds)
+ 		if err != nil {
 diff --git a/pkg/controller/daemon/patch_nodeselector.go b/pkg/controller/daemon/patch_nodeselector.go
 new file mode 100644
 index 00000000000..356437dd522
@@ -1071,6 +1081,37 @@ index 00000000000..6553fe694ea
 +		})
 +	}
 +}
+diff --git a/pkg/controller/daemon/update.go b/pkg/controller/daemon/update.go
+index 6add594a817..c18e09f54ad 100644
+--- a/pkg/controller/daemon/update.go
++++ b/pkg/controller/daemon/update.go
+@@ -179,7 +179,7 @@ func (dsc *DaemonSetsController) rollingUpdate(ctx context.Context, ds *apps.Dae
+ 				if err != nil {
+ 					return fmt.Errorf("couldn't get node for nodeName %q: %v", nodeName, err)
+ 				}
+-				if shouldRun, _ := NodeShouldRunDaemonPod(node, ds); !shouldRun {
++				if shouldRun, _ := dsc.nodeShouldRunDaemonPod(node, ds); !shouldRun {
+ 					logger.V(5).Info("DaemonSet pod on node is not available and does not match scheduling constraints, remove old pod", "daemonset", klog.KObj(ds), "node", nodeName, "oldPod", klog.KObj(oldPod))
+ 					oldPodsToDelete = append(oldPodsToDelete, oldPod.Name)
+ 					continue
+@@ -196,7 +196,7 @@ func (dsc *DaemonSetsController) rollingUpdate(ctx context.Context, ds *apps.Dae
+ 				if err != nil {
+ 					return fmt.Errorf("couldn't get node for nodeName %q: %v", nodeName, err)
+ 				}
+-				if shouldRun, _ := NodeShouldRunDaemonPod(node, ds); !shouldRun {
++				if shouldRun, _ := dsc.nodeShouldRunDaemonPod(node, ds); !shouldRun {
+ 					shouldNotRunPodsToDelete = append(shouldNotRunPodsToDelete, oldPod.Name)
+ 					continue
+ 				}
+@@ -586,7 +586,7 @@ func (dsc *DaemonSetsController) updatedDesiredNodeCounts(ctx context.Context, d
+ 	logger := klog.FromContext(ctx)
+ 	for i := range nodeList {
+ 		node := nodeList[i]
+-		wantToRun, _ := NodeShouldRunDaemonPod(node, ds)
++		wantToRun, _ := dsc.nodeShouldRunDaemonPod(node, ds)
+ 		if !wantToRun {
+ 			continue
+ 		}
 -- 
 2.49.0
 

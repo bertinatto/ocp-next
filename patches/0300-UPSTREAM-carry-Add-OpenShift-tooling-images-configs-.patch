@@ -1,4 +1,4 @@
-From 2f442048c00c027bf478e0edff75e920f178c13e Mon Sep 17 00:00:00 2001
+From 2c89df29cc6bec0e28094746119558cb8bcceba1 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -9,15 +9,15 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  DOWNSTREAM_OWNERS                             |   4 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
  hack/lib/golang.sh                            |   1 -
- .../cmd/k8s-tests-ext/disabled_tests.go       | 239 ++++++++++++++++++
- .../k8s-tests-ext/environment_selectors.go    | 235 +++++++++++++++++
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 231 +++++++++++++++++
+ .../k8s-tests-ext/environment_selectors.go    | 235 ++++++++++++++++++
  openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 -------
+ openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 --------
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 -----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  50 ++--
+ openshift-hack/e2e/annotate/rules.go          |  46 ++--
  openshift-hack/e2e/include.go                 |   1 -
  .../images/hyperkube/Dockerfile.rhel          |   8 +-
  .../Dockerfile.rhel                           |  10 +-
@@ -25,7 +25,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
  openshift-hack/test-kubernetes-e2e.sh         |   1 +
- 20 files changed, 625 insertions(+), 499 deletions(-)
+ 20 files changed, 611 insertions(+), 501 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -92,10 +92,10 @@ index d8485b53b88..898ce1c0c52 100755
    echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..3f9f442cb73
+index 00000000000..00863495579
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,231 @@
 +package main
 +
 +import (
@@ -276,20 +276,12 @@ index 00000000000..3f9f442cb73
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743612984702079
 +			"[Feature:SchedulerAsyncPreemption]",
 +
-+			// Ryan is working with upstream
-+			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743423013941239
-+			"[FeatureGate:KubeletFineGrainedAuthz]",
-+
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
 +			"[Feature:UserNamespacesSupport]",
 +
 +			// Kevin to look into this
 +			"[Feature:OrderedNamespaceDeletion]",
-+
-+			// Asked Joel Smith to take a look
-+			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743781791943209
-+			"[sig-node] Pod InPlace Resize Container [FeatureGate:InPlacePodVerticalScaling]",
 +
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1744285107158659?thread_ts=1743190159.388209&cid=C08KA82J2JF
@@ -1208,7 +1200,7 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..1911e1146c1 100644
+index a62f99f1fd9..efead90e8c8 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -10,22 +10,19 @@ var (
@@ -1249,7 +1241,7 @@ index a62f99f1fd9..1911e1146c1 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -174,25 +174,28 @@ var (
+@@ -174,25 +174,20 @@ var (
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
  
@@ -1262,28 +1254,22 @@ index a62f99f1fd9..1911e1146c1 100644
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
-+			// Ryan is working with upstream
-+			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743423013941239
-+			`\[FeatureGate:KubeletFineGrainedAuthz\]`,
- 
--			// https://issues.redhat.com/browse/OCPBUGS-45273
--			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
 +			`\[Feature:UserNamespacesSupport\]`,
  
--			// https://issues.redhat.com/browse/OCPBUGS-45274
--			// https://github.com/kubernetes/kubernetes/issues/129056
--			`\[sig-node\] PodRejectionStatus Kubelet should reject pod when the node didn't have enough resource`,
+-			// https://issues.redhat.com/browse/OCPBUGS-45273
+-			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
 +			// Kevin to look into this
 +			`\[Feature:OrderedNamespaceDeletion\]`,
  
+-			// https://issues.redhat.com/browse/OCPBUGS-45274
+-			// https://github.com/kubernetes/kubernetes/issues/129056
+-			`\[sig-node\] PodRejectionStatus Kubelet should reject pod when the node didn't have enough resource`,
+-
 -			// https://issues.redhat.com/browse/OCPBUGS-45359
 -			`\[Feature:RecoverVolumeExpansionFailure\]`,
-+			// Asked Joel Smith to take a look
-+			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743781791943209
-+			`\[sig-node\] Pod InPlace Resize Container \[FeatureGate:InPlacePodVerticalScaling\]`,
- 
+-
 -			// https://issues.redhat.com/browse/OCPBUGS-46477
 -			`\[sig-storage\] In-tree Volumes \[Driver: azure-file\]`,
 +			// Requires flipping the gate in o/api after branch cut
@@ -1292,7 +1278,7 @@ index a62f99f1fd9..1911e1146c1 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +265,11 @@ var (
+@@ -262,6 +257,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
