@@ -1,11 +1,23 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"os"
 	"os/exec"
 )
 
 func main() {
+	base := flag.String("base", "", "Upstream branch to start with")
+	onlyPatches := flag.Bool("only-patches", false, "Only apply patches, no dependency bump")
+	flag.Parse()
+
+	if *base == "" {
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "ERROR: base cannot be empty.\n")
+		os.Exit(1)
+	}
+
 	git := New("kubernetes")
 
 	if err := git.Clone("upstream", "https://github.com/kubernetes/kubernetes.git"); err != nil {
@@ -34,8 +46,7 @@ func main() {
 		panic(err)
 	}
 
-	// if err := git.CreateBranch("ocp-next", "upstream/release-1.32"); err != nil {
-	if err := git.CreateBranch("ocp-next", "v1.32.1"); err != nil {
+	if err := git.CreateBranch("ocp-next", *base); err != nil {
 		panic(err)
 	}
 
@@ -46,6 +57,10 @@ func main() {
 
 	if err := git.ApplyPatches("patches"); err != nil {
 		panic(err)
+	}
+
+	if *onlyPatches {
+		os.Exit(0)
 	}
 
 	err = updateDependencies(git.workTree)
@@ -88,9 +103,12 @@ func main() {
 		panic(err)
 	}
 
-	err = updateVendor(git.workTree)
-	if err != nil {
-		panic(err)
+	// Apparently I need to do this twice
+	for range 2 {
+		err = updateVendor(git.workTree)
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	if err := git.Add("."); err != nil {

@@ -8,16 +8,21 @@ import (
 
 func updateDependencies(workTree string) error {
 	deps := [][]string{
-		{"github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2", "v2.21-openshift-4.19"},
-		// {"github.com/openshift/api=github.com/dusk125/api", "k8s-1.32"},
-		// {"github.com/openshift/client-go=github.com/dusk125/client-go", "k8s-1.32"},
-		// {"github.com/openshift/library-go=github.com/dusk125/library-go", "k8s-1.32"},
-		// {"github.com/openshift/apiserver-library-go=github.com/dusk125/apiserver-library-go", "k8s-1.32"},
+		{"github.com/onsi/ginkgo/v2=github.com/openshift/onsi-ginkgo/v2", "v2.21-openshift-4.20"},
+		{"github.com/openshift/api=github.com/bertinatto/api", "bump-v1.33"},
+		{"github.com/openshift/client-go=github.com/bertinatto/client-go", "bump-v1.33"},
+		{"github.com/openshift/library-go=github.com/bertinatto/library-go", "bump-v1.33"},
+		{"github.com/openshift/apiserver-library-go=github.com/bertinatto/apiserver-library-go", "bump-v1.33"},
 		// FIXME
-		{"github.com/openshift/api", "latest"},
-		{"github.com/openshift/client-go", "latest"},
-		{"github.com/openshift/library-go", "latest"},
-		{"github.com/openshift/apiserver-library-go", "latest"},
+		// {"github.com/openshift/api", "latest"},
+		// {"github.com/openshift/client-go", "latest"},
+		// {"github.com/openshift/library-go", "latest"},
+		// {"github.com/openshift/apiserver-library-go", "latest"},
+		// Kevin
+		// {"github.com/openshift/api=github.com/kevinrizza/api-1", "update-to-1.33"},
+		// {"github.com/openshift/client-go=github.com/kevinrizza/client-go", "update-kube-1.33"},
+		// {"github.com/openshift/library-go=github.com/kevinrizza/library-go", "1.33-kube-update"},
+		// {"github.com/openshift/apiserver-library-go=github.com/kevinrizza/apiserver-library-go", "update-kube-1.33"},
 	}
 
 	for i := range deps {
