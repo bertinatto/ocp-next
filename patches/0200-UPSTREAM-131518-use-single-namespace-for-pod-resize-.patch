@@ -1,0 +1,59 @@
+From 9621ccf3d847658e9e3930c5f8e7bb76970c778b Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 28 Apr 2025 18:00:04 -0300
+Subject: [PATCH] UPSTREAM: 131518: use single namespace for pod resize tests
+
+---
+ test/e2e/common/node/pod_resize.go | 10 ++++------
+ 1 file changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/test/e2e/common/node/pod_resize.go b/test/e2e/common/node/pod_resize.go
+index 8548a829227..8043fef9796 100644
+--- a/test/e2e/common/node/pod_resize.go
++++ b/test/e2e/common/node/pod_resize.go
+@@ -68,7 +68,7 @@ func offsetMemory(index int64, value string) string {
+ 	return ptr.String()
+ }
+ 
+-func doPodResizeTests() {
++func doPodResizeTests(f *framework.Framework) {
+ 	type testCase struct {
+ 		name                string
+ 		containers          []e2epod.ResizableContainerInfo
+@@ -1156,7 +1156,6 @@ func doPodResizeTests() {
+ 
+ 	for idx := range tests {
+ 		tc := tests[idx]
+-		f := framework.NewDefaultFramework("pod-resize-tests")
+ 
+ 		ginkgo.It(tc.name, func(ctx context.Context) {
+ 			podClient := e2epod.NewPodClient(f)
+@@ -1234,7 +1233,7 @@ func doPodResizeTests() {
+ 	}
+ }
+ 
+-func doPodResizeErrorTests() {
++func doPodResizeErrorTests(f *framework.Framework) {
+ 
+ 	type testCase struct {
+ 		name        string
+@@ -1389,7 +1388,6 @@ func doPodResizeErrorTests() {
+ 
+ 	for idx := range tests {
+ 		tc := tests[idx]
+-		f := framework.NewDefaultFramework("pod-resize-error-tests")
+ 
+ 		ginkgo.It(tc.name, func(ctx context.Context) {
+ 			podClient := e2epod.NewPodClient(f)
+@@ -1452,6 +1450,6 @@ var _ = SIGDescribe("Pod InPlace Resize Container", framework.WithFeatureGate(fe
+ 		}
+ 	})
+ 
+-	doPodResizeTests()
+-	doPodResizeErrorTests()
++	doPodResizeTests(f)
++	doPodResizeErrorTests(f)
+ })
+-- 
+2.49.0
+

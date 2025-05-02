@@ -1,0 +1,187 @@
+From 3032f468bd5c0963dbe899fde6fc78b2eb572e81 Mon Sep 17 00:00:00 2001
+From: Luis Sanchez <sanchezl@redhat.com>
+Date: Fri, 15 Nov 2024 16:50:20 -0500
+Subject: [PATCH] UPSTREAM: <carry>: allow TLS1.3 or modern profile to be
+ specified
+
+Co-authored-by: Allen Ray <alray@redhat.com>
+---
+ .../apiserver/validate_apiserver.go           | 27 +++++------
+ .../apiserver/validate_apiserver_test.go      | 48 +++++++++++++------
+ 2 files changed, 45 insertions(+), 30 deletions(-)
+
+diff --git a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go b/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go
+index 337cbb686a2..c7a97ae1cc9 100644
+--- a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go
++++ b/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver.go
+@@ -180,12 +180,6 @@ func validateTLSSecurityProfileType(fieldPath *field.Path, profile *configv1.TLS
+ 
+ 	errs := field.ErrorList{}
+ 
+-	availableTypes := []string{
+-		string(configv1.TLSProfileOldType),
+-		string(configv1.TLSProfileIntermediateType),
+-		string(configv1.TLSProfileCustomType),
+-	}
+-
+ 	switch profile.Type {
+ 	case "":
+ 		if profile.Old != nil || profile.Intermediate != nil || profile.Modern != nil || profile.Custom != nil {
+@@ -200,13 +194,15 @@ func validateTLSSecurityProfileType(fieldPath *field.Path, profile *configv1.TLS
+ 			errs = append(errs, field.Required(fieldPath.Child("intermediate"), fmt.Sprintf(typeProfileMismatchFmt, profile.Type)))
+ 		}
+ 	case configv1.TLSProfileModernType:
+-		errs = append(errs, field.NotSupported(fieldPath.Child("type"), profile.Type, availableTypes))
++		if profile.Modern == nil {
++			errs = append(errs, field.Required(fieldPath.Child("modern"), fmt.Sprintf(typeProfileMismatchFmt, profile.Type)))
++		}
+ 	case configv1.TLSProfileCustomType:
+ 		if profile.Custom == nil {
+ 			errs = append(errs, field.Required(fieldPath.Child("custom"), fmt.Sprintf(typeProfileMismatchFmt, profile.Type)))
+ 		}
+ 	default:
+-		errs = append(errs, field.Invalid(typePath, profile.Type, fmt.Sprintf("unknown type, valid values are: %v", availableTypes)))
++		errs = append(errs, field.Invalid(typePath, profile.Type, fmt.Sprintf("unknown type, valid values are: [Old Intermediate Modern Custom]")))
+ 	}
+ 
+ 	return errs
+@@ -215,6 +211,13 @@ func validateTLSSecurityProfileType(fieldPath *field.Path, profile *configv1.TLS
+ func validateCipherSuites(fieldPath *field.Path, suites []string, version configv1.TLSProtocolVersion) field.ErrorList {
+ 	errs := field.ErrorList{}
+ 
++	if version == configv1.VersionTLS13 {
++		if len(suites) != 0 {
++			errs = append(errs, field.Invalid(fieldPath, suites, "TLS 1.3 cipher suites are not configurable"))
++		}
++		return errs
++	}
++
+ 	if ianaSuites := libgocrypto.OpenSSLToIANACipherSuites(suites); len(ianaSuites) == 0 {
+ 		errs = append(errs, field.Invalid(fieldPath, suites, "no supported cipher suite found"))
+ 	}
+@@ -224,7 +227,7 @@ func validateCipherSuites(fieldPath *field.Path, suites []string, version config
+ 	// configuration to return an error when http2 required cipher suites aren't
+ 	// provided.
+ 	// See: go/x/net/http2.ConfigureServer for futher information.
+-	if version < configv1.VersionTLS13 && !haveRequiredHTTP2CipherSuites(suites) {
++	if !haveRequiredHTTP2CipherSuites(suites) {
+ 		errs = append(errs, field.Invalid(fieldPath, suites, "http2: TLSConfig.CipherSuites is missing an HTTP/2-required AES_128_GCM_SHA256 cipher (need at least one of ECDHE-RSA-AES128-GCM-SHA256 or ECDHE-ECDSA-AES128-GCM-SHA256)"))
+ 	}
+ 
+@@ -246,14 +249,8 @@ func haveRequiredHTTP2CipherSuites(suites []string) bool {
+ 
+ func validateMinTLSVersion(fieldPath *field.Path, version configv1.TLSProtocolVersion) field.ErrorList {
+ 	errs := field.ErrorList{}
+-
+-	if version == configv1.VersionTLS13 {
+-		return append(errs, field.NotSupported(fieldPath, version, []string{string(configv1.VersionTLS10), string(configv1.VersionTLS11), string(configv1.VersionTLS12)}))
+-	}
+-
+ 	if _, err := libgocrypto.TLSVersion(string(version)); err != nil {
+ 		errs = append(errs, field.Invalid(fieldPath, version, err.Error()))
+ 	}
+-
+ 	return errs
+ }
+diff --git a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver_test.go b/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver_test.go
+index 54c072363c8..380aa0d4cb1 100644
+--- a/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver_test.go
++++ b/openshift-kube-apiserver/admission/customresourcevalidation/apiserver/validate_apiserver_test.go
+@@ -144,19 +144,12 @@ func Test_validateTLSSecurityProfile(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "modern type - currently unsupported",
++			name: "modern type - supported",
+ 			profile: &configv1.TLSSecurityProfile{
+ 				Type:   configv1.TLSProfileModernType,
+ 				Modern: &configv1.ModernTLSProfile{},
+ 			},
+-			want: field.ErrorList{
+-				field.NotSupported(rootFieldPath.Child("type"), configv1.TLSProfileModernType,
+-					[]string{
+-						string(configv1.TLSProfileOldType),
+-						string(configv1.TLSProfileIntermediateType),
+-						string(configv1.TLSProfileCustomType),
+-					}),
+-			},
++			want: field.ErrorList{},
+ 		},
+ 		{
+ 			name: "unknown type",
+@@ -164,7 +157,7 @@ func Test_validateTLSSecurityProfile(t *testing.T) {
+ 				Type: "something",
+ 			},
+ 			want: field.ErrorList{
+-				field.Invalid(rootFieldPath.Child("type"), "something", "unknown type, valid values are: [Old Intermediate Custom]"),
++				field.Invalid(rootFieldPath.Child("type"), "something", "unknown type, valid values are: [Old Intermediate Modern Custom]"),
+ 			},
+ 		},
+ 		{
+@@ -212,19 +205,16 @@ func Test_validateTLSSecurityProfile(t *testing.T) {
+ 			},
+ 		},
+ 		{
+-			name: "min tls 1.3 - currently unsupported",
++			name: "min tls 1.3 - supported",
+ 			profile: &configv1.TLSSecurityProfile{
+ 				Type: "Custom",
+ 				Custom: &configv1.CustomTLSProfile{
+ 					TLSProfileSpec: configv1.TLSProfileSpec{
+-						Ciphers:       []string{"ECDHE-ECDSA-CHACHA20-POLY1305"},
+ 						MinTLSVersion: configv1.VersionTLS13,
+ 					},
+ 				},
+ 			},
+-			want: field.ErrorList{
+-				field.NotSupported(rootFieldPath.Child("custom", "minTLSVersion"), configv1.VersionTLS13, []string{string(configv1.VersionTLS10), string(configv1.VersionTLS11), string(configv1.VersionTLS12)}),
+-			},
++			want: field.ErrorList{},
+ 		},
+ 		{
+ 			name: "custom profile missing required http2 ciphers",
+@@ -246,6 +236,19 @@ func Test_validateTLSSecurityProfile(t *testing.T) {
+ 				field.Invalid(rootFieldPath.Child("custom", "ciphers"), []string{"ECDSA-AES256-GCM-SHA384", "ECDHE-RSA-AES256-GCM-SHA384", "ECDHE-ECDSA-CHACHA20-POLY1305", "ECDHE-RSA-CHACHA20-POLY1305"}, "http2: TLSConfig.CipherSuites is missing an HTTP/2-required AES_128_GCM_SHA256 cipher (need at least one of ECDHE-RSA-AES128-GCM-SHA256 or ECDHE-ECDSA-AES128-GCM-SHA256)"),
+ 			},
+ 		},
++		{
++			name: "custom profile required http2 ciphers tls 1.3",
++			profile: &configv1.TLSSecurityProfile{
++				Type: "Custom",
++				Custom: &configv1.CustomTLSProfile{
++					TLSProfileSpec: configv1.TLSProfileSpec{
++						Ciphers:       []string{},
++						MinTLSVersion: configv1.VersionTLS13,
++					},
++				},
++			},
++			want: field.ErrorList{},
++		},
+ 		{
+ 			name: "custom profile with one required http2 ciphers",
+ 			profile: &configv1.TLSSecurityProfile{
+@@ -265,6 +268,21 @@ func Test_validateTLSSecurityProfile(t *testing.T) {
+ 			},
+ 			want: field.ErrorList{},
+ 		},
++		{
++			name: "custom profile min tls 1.3 cannot customize",
++			profile: &configv1.TLSSecurityProfile{
++				Type: "Custom",
++				Custom: &configv1.CustomTLSProfile{
++					TLSProfileSpec: configv1.TLSProfileSpec{
++						Ciphers:       []string{"TLS_AES_128_GCM_SHA256"},
++						MinTLSVersion: configv1.VersionTLS13,
++					},
++				},
++			},
++			want: field.ErrorList{
++				field.Invalid(rootFieldPath.Child("custom", "ciphers"), []string{"TLS_AES_128_GCM_SHA256"}, "TLS 1.3 cipher suites are not configurable"),
++			},
++		},
+ 	}
+ 	for _, tt := range tests {
+ 		t.Run(tt.name, func(t *testing.T) {
+-- 
+2.49.0
+

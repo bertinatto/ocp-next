@@ -1,4 +1,4 @@
-From 2c89df29cc6bec0e28094746119558cb8bcceba1 Mon Sep 17 00:00:00 2001
+From ea777900472beaec80c55d6e4a30537d02e92631 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -92,7 +92,7 @@ index d8485b53b88..898ce1c0c52 100755
    echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..00863495579
+index 00000000000..6c188b5c85a
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 @@ -0,0 +1,231 @@
@@ -272,6 +272,9 @@ index 00000000000..00863495579
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			"[sig-node] ImageCredentialProvider [Feature:KubeletCredentialProviders] should be able to create pod with image credentials fetched from external credential provider",
 +
++			// Kevin to look into this
++			"[Feature:OrderedNamespaceDeletion]",
++
 +			// Jan will look into this
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743612984702079
 +			"[Feature:SchedulerAsyncPreemption]",
@@ -279,9 +282,6 @@ index 00000000000..00863495579
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
 +			"[Feature:UserNamespacesSupport]",
-+
-+			// Kevin to look into this
-+			"[Feature:OrderedNamespaceDeletion]",
 +
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1744285107158659?thread_ts=1743190159.388209&cid=C08KA82J2JF
@@ -1200,7 +1200,7 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..efead90e8c8 100644
+index a62f99f1fd9..279671894d1 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -10,22 +10,19 @@ var (
@@ -1254,14 +1254,14 @@ index a62f99f1fd9..efead90e8c8 100644
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
-+			// Requires flipping the gate in o/api after branch cut
-+			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
-+			`\[Feature:UserNamespacesSupport\]`,
++			// Kevin to look into this
++			`\[Feature:OrderedNamespaceDeletion\]`,
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
-+			// Kevin to look into this
-+			`\[Feature:OrderedNamespaceDeletion\]`,
++			// Requires flipping the gate in o/api after branch cut
++			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
++			`\[Feature:UserNamespacesSupport\]`,
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45274
 -			// https://github.com/kubernetes/kubernetes/issues/129056
