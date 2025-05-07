@@ -1,11 +1,13 @@
-From 9621ccf3d847658e9e3930c5f8e7bb76970c778b Mon Sep 17 00:00:00 2001
+From 515bef6ff096855bdacc14cb80f3150f16a2e7d5 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
-Date: Mon, 28 Apr 2025 18:00:04 -0300
-Subject: [PATCH] UPSTREAM: 131518: use single namespace for pod resize tests
+Date: Tue, 6 May 2025 10:25:01 -0300
+Subject: [PATCH] UPSTREAM: 131518: Don't reinitialize test framework during
+ each test case
 
 ---
  test/e2e/common/node/pod_resize.go | 10 ++++------
- 1 file changed, 4 insertions(+), 6 deletions(-)
+ test/e2e/node/pod_resize.go        |  6 ++----
+ 2 files changed, 6 insertions(+), 10 deletions(-)
 
 diff --git a/test/e2e/common/node/pod_resize.go b/test/e2e/common/node/pod_resize.go
 index 8548a829227..8043fef9796 100644
@@ -54,6 +56,37 @@ index 8548a829227..8043fef9796 100644
 +	doPodResizeTests(f)
 +	doPodResizeErrorTests(f)
  })
+diff --git a/test/e2e/node/pod_resize.go b/test/e2e/node/pod_resize.go
+index 06e2879dd1e..7404910cda4 100644
+--- a/test/e2e/node/pod_resize.go
++++ b/test/e2e/node/pod_resize.go
+@@ -39,7 +39,7 @@ import (
+ 	"github.com/onsi/gomega"
+ )
+ 
+-func doPodResizeAdmissionPluginsTests() {
++func doPodResizeAdmissionPluginsTests(f *framework.Framework) {
+ 	testcases := []struct {
+ 		name                  string
+ 		enableAdmissionPlugin func(ctx context.Context, f *framework.Framework)
+@@ -118,8 +118,6 @@ func doPodResizeAdmissionPluginsTests() {
+ 	}
+ 
+ 	for _, tc := range testcases {
+-		f := framework.NewDefaultFramework(tc.name)
+-
+ 		ginkgo.It(tc.name, func(ctx context.Context) {
+ 			containers := []e2epod.ResizableContainerInfo{
+ 				{
+@@ -458,7 +456,7 @@ var _ = SIGDescribe("Pod InPlace Resize Container", framework.WithFeatureGate(fe
+ 			e2eskipper.Skipf("runtime does not support InPlacePodVerticalScaling -- skipping")
+ 		}
+ 	})
+-	doPodResizeAdmissionPluginsTests()
++	doPodResizeAdmissionPluginsTests(f)
+ })
+ 
+ func waitForResourceQuota(ctx context.Context, c clientset.Interface, ns, quotaName string) error {
 -- 
 2.49.0
 

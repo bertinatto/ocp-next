@@ -1,0 +1,170 @@
+From b242fdc978dbea81d8a6c92b0682628ad846adf3 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 28 Apr 2025 18:53:43 -0300
+Subject: [PATCH] UPSTREAM: <carry>: openshift-kube-apiserver: add
+ openshift-kube-apiserver code
+
+---
+ .../authorization/browsersafe/authorizer.go   | 17 ++++---
+ .../browsersafe/authorizer_test.go            | 50 ++++++++++++-------
+ pkg/kubeapiserver/authorizer/reload.go        |  4 +-
+ 3 files changed, 44 insertions(+), 27 deletions(-)
+
+diff --git a/openshift-kube-apiserver/authorization/browsersafe/authorizer.go b/openshift-kube-apiserver/authorization/browsersafe/authorizer.go
+index 2b39b309f69..370d68ee84a 100644
+--- a/openshift-kube-apiserver/authorization/browsersafe/authorizer.go
++++ b/openshift-kube-apiserver/authorization/browsersafe/authorizer.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 
+ 	"k8s.io/apimachinery/pkg/util/sets"
++	"k8s.io/apiserver/pkg/authentication/user"
+ 	"k8s.io/apiserver/pkg/authorization/authorizer"
+ )
+ 
+@@ -15,15 +16,11 @@ const (
+ 
+ type browserSafeAuthorizer struct {
+ 	delegate authorizer.Authorizer
+-
+-	// list of groups, any of which indicate the request is authenticated
+-	authenticatedGroups sets.String
+ }
+ 
+-func NewBrowserSafeAuthorizer(delegate authorizer.Authorizer, authenticatedGroups ...string) authorizer.Authorizer {
++func NewBrowserSafeAuthorizer(delegate authorizer.Authorizer) authorizer.Authorizer {
+ 	return &browserSafeAuthorizer{
+-		delegate:            delegate,
+-		authenticatedGroups: sets.NewString(authenticatedGroups...),
++		delegate: delegate,
+ 	}
+ }
+ 
+@@ -54,13 +51,17 @@ func (a *browserSafeAuthorizer) getBrowserSafeAttributes(attributes authorizer.A
+ 		return attributes
+ 	}
+ 
+-	if user := attributes.GetUser(); user != nil {
+-		if a.authenticatedGroups.HasAny(user.GetGroups()...) {
++	// unauthenticatedGroup := sets.NewString()
++	if u := attributes.GetUser(); u != nil {
++		isAnonymous := u.GetName() == user.Anonymous
++		isUnauthenticated := sets.New[string](u.GetGroups()...).Has(user.AllUnauthenticated)
++		if !isAnonymous && !isUnauthenticated {
+ 			// An authenticated request indicates this isn't a browser page load.
+ 			// Browsers cannot make direct authenticated requests.
+ 			// This depends on the API not enabling basic or cookie-based auth.
+ 			return attributes
+ 		}
++
+ 	}
+ 
+ 	return &browserSafeAttributes{
+diff --git a/openshift-kube-apiserver/authorization/browsersafe/authorizer_test.go b/openshift-kube-apiserver/authorization/browsersafe/authorizer_test.go
+index 1d14a86dadd..56a79039c25 100644
+--- a/openshift-kube-apiserver/authorization/browsersafe/authorizer_test.go
++++ b/openshift-kube-apiserver/authorization/browsersafe/authorizer_test.go
+@@ -20,13 +20,11 @@ func TestBrowserSafeAuthorizer(t *testing.T) {
+ 			attributes:   authorizer.AttributesRecord{ResourceRequest: false, Verb: "GET"},
+ 			expectedVerb: "GET",
+ 		},
+-
+ 		"non-proxy": {
+ 			attributes:          authorizer.AttributesRecord{ResourceRequest: true, Verb: "get", Resource: "pods", Subresource: "logs"},
+ 			expectedVerb:        "get",
+ 			expectedSubresource: "logs",
+ 		},
+-
+ 		"unsafe proxy subresource": {
+ 			attributes:          authorizer.AttributesRecord{ResourceRequest: true, Verb: "get", Resource: "pods", Subresource: "proxy"},
+ 			expectedVerb:        "get",
+@@ -38,35 +36,53 @@ func TestBrowserSafeAuthorizer(t *testing.T) {
+ 			expectedVerb:   "unsafeproxy",
+ 			expectedReason: "proxy verb changed to unsafeproxy",
+ 		},
+-		"unsafe proxy verb anonymous": {
++		"unsafe proxy verb anonymous only": {
++			attributes: authorizer.AttributesRecord{ResourceRequest: true, Verb: "proxy", Resource: "nodes",
++				User: &user.DefaultInfo{Name: "system:anonymous"}},
++			expectedVerb:   "unsafeproxy",
++			expectedReason: "proxy verb changed to unsafeproxy",
++		},
++		"unsafe proxy verb unauthenticated only": {
++			attributes: authorizer.AttributesRecord{ResourceRequest: true, Verb: "proxy", Resource: "nodes",
++				User: &user.DefaultInfo{Groups: []string{"system:unauthenticated"}}},
++			expectedVerb:   "unsafeproxy",
++			expectedReason: "proxy verb changed to unsafeproxy",
++		},
++		"unsafe proxy verb anonymous and unauthenticated": {
+ 			attributes: authorizer.AttributesRecord{ResourceRequest: true, Verb: "proxy", Resource: "nodes",
+ 				User: &user.DefaultInfo{Name: "system:anonymous", Groups: []string{"system:unauthenticated"}}},
+ 			expectedVerb:   "unsafeproxy",
+ 			expectedReason: "proxy verb changed to unsafeproxy",
+ 		},
+-
+ 		"proxy subresource authenticated": {
+ 			attributes: authorizer.AttributesRecord{ResourceRequest: true, Verb: "get", Resource: "pods", Subresource: "proxy",
+ 				User: &user.DefaultInfo{Name: "bob", Groups: []string{"system:authenticated"}}},
+ 			expectedVerb:        "get",
+ 			expectedSubresource: "proxy",
+ 		},
++		"proxy subresource authenticated no group": {
++			attributes: authorizer.AttributesRecord{ResourceRequest: true, Verb: "get", Resource: "pods", Subresource: "proxy",
++				User: &user.DefaultInfo{Name: "bob"}},
++			expectedVerb:        "get",
++			expectedSubresource: "proxy",
++		},
+ 	} {
+-		delegateAuthorizer := &recordingAuthorizer{}
+-		safeAuthorizer := NewBrowserSafeAuthorizer(delegateAuthorizer, "system:authenticated")
++		t.Run(name, func(t *testing.T) {
++			delegateAuthorizer := &recordingAuthorizer{}
++			safeAuthorizer := NewBrowserSafeAuthorizer(delegateAuthorizer)
+ 
+-		authorized, reason, err := safeAuthorizer.Authorize(context.TODO(), tc.attributes)
+-		if authorized == authorizer.DecisionAllow || reason != tc.expectedReason || err != nil {
+-			t.Errorf("%s: unexpected output: %v %s %v", name, authorized, reason, err)
+-			continue
+-		}
++			authorized, reason, err := safeAuthorizer.Authorize(context.TODO(), tc.attributes)
++			if authorized == authorizer.DecisionAllow || reason != tc.expectedReason || err != nil {
++				t.Errorf("%s: unexpected output: %v %s %v", name, authorized, reason, err)
++			}
+ 
+-		if delegateAuthorizer.attributes.GetVerb() != tc.expectedVerb {
+-			t.Errorf("%s: expected verb %s, got %s", name, tc.expectedVerb, delegateAuthorizer.attributes.GetVerb())
+-		}
+-		if delegateAuthorizer.attributes.GetSubresource() != tc.expectedSubresource {
+-			t.Errorf("%s: expected verb %s, got %s", name, tc.expectedSubresource, delegateAuthorizer.attributes.GetSubresource())
+-		}
++			if delegateAuthorizer.attributes.GetVerb() != tc.expectedVerb {
++				t.Errorf("%s: expected verb %s, got %s", name, tc.expectedVerb, delegateAuthorizer.attributes.GetVerb())
++			}
++			if delegateAuthorizer.attributes.GetSubresource() != tc.expectedSubresource {
++				t.Errorf("%s: expected verb %s, got %s", name, tc.expectedSubresource, delegateAuthorizer.attributes.GetSubresource())
++			}
++		})
+ 	}
+ }
+ 
+diff --git a/pkg/kubeapiserver/authorizer/reload.go b/pkg/kubeapiserver/authorizer/reload.go
+index 3de2fff36a8..a787efad1ff 100644
+--- a/pkg/kubeapiserver/authorizer/reload.go
++++ b/pkg/kubeapiserver/authorizer/reload.go
+@@ -169,11 +169,11 @@ func (r *reloadableAuthorizerResolver) newForConfig(authzConfig *authzconfig.Aut
+ 				return nil, nil, fmt.Errorf("authorizer type RBAC is not allowed if it was not enabled at initial server startup")
+ 			}
+ 			// Wrap with an authorizer that detects unsafe requests and modifies verbs/resources appropriately so policy can address them separately
+-			authorizers = append(authorizers, authorizationmetrics.InstrumentedAuthorizer(string(configuredAuthorizer.Type), configuredAuthorizer.Name, browsersafe.NewBrowserSafeAuthorizer(r.rbacAuthorizer, user.AllAuthenticated)))
++			authorizers = append(authorizers, authorizationmetrics.InstrumentedAuthorizer(string(configuredAuthorizer.Type), configuredAuthorizer.Name, browsersafe.NewBrowserSafeAuthorizer(r.rbacAuthorizer)))
+ 			ruleResolvers = append(ruleResolvers, r.rbacAuthorizer)
+ 		case authzconfig.AuthorizerType(modes.ModeScope):
+ 			// Wrap with an authorizer that detects unsafe requests and modifies verbs/resources appropriately so policy can address them separately
+-			authorizers = append(authorizers, browsersafe.NewBrowserSafeAuthorizer(r.scopeLimitedAuthorizer, user.AllAuthenticated))
++			authorizers = append(authorizers, browsersafe.NewBrowserSafeAuthorizer(r.scopeLimitedAuthorizer))
+ 		case authzconfig.AuthorizerType(modes.ModeSystemMasters):
+ 			// no browsersafeauthorizer here becase that rewrites the resources.  This authorizer matches no matter which resource matches.
+ 			authorizers = append(authorizers, authorizerfactory.NewPrivilegedGroups(user.SystemPrivilegedGroup))
+-- 
+2.49.0
+

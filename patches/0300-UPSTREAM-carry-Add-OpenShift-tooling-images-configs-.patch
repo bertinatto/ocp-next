@@ -1,4 +1,4 @@
-From ea777900472beaec80c55d6e4a30537d02e92631 Mon Sep 17 00:00:00 2001
+From abc9e8b17e20d2063efdd520bd44a42a1045482b Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -6,26 +6,28 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
 
 ---
  .ci-operator.yaml                             |   2 +-
+ .../openshift_payload_hyperkube.json          |   2 +-
  DOWNSTREAM_OWNERS                             |   4 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
  hack/lib/golang.sh                            |   1 -
- .../cmd/k8s-tests-ext/disabled_tests.go       | 231 +++++++++++++++++
- .../k8s-tests-ext/environment_selectors.go    | 235 ++++++++++++++++++
- openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  44 +++-
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 228 ++++++++++++++++
+ .../k8s-tests-ext/environment_selectors.go    | 249 ++++++++++++++++++
+ openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  63 ++++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
- openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 --------
+ openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 -------
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
- openshift-hack/cmd/k8s-tests/runtest.go       | 143 -----------
+ openshift-hack/cmd/k8s-tests/runtest.go       | 143 ----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  46 ++--
+ openshift-hack/e2e/annotate/rules.go          |  45 ++--
  openshift-hack/e2e/include.go                 |   1 -
+ openshift-hack/e2e/kube_e2e_test.go           |  45 +++-
  .../images/hyperkube/Dockerfile.rhel          |   8 +-
  .../Dockerfile.rhel                           |  10 +-
  .../images/kube-proxy/Dockerfile.rhel         |   2 +-
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
- openshift-hack/images/tests/Dockerfile.rhel   |   2 +-
- openshift-hack/test-kubernetes-e2e.sh         |   1 +
- 20 files changed, 611 insertions(+), 501 deletions(-)
+ openshift-hack/images/tests/Dockerfile.rhel   |   5 +-
+ openshift-hack/test-kubernetes-e2e.sh         |   4 +-
+ 22 files changed, 675 insertions(+), 519 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -44,6 +46,17 @@ index 7c15f83e3e6..93022ee9763 100644
    namespace: openshift
 -  tag: rhel-9-release-golang-1.23-openshift-4.19
 +  tag: rhel-9-release-golang-1.24-nofips-openshift-4.19
+diff --git a/.openshift-tests-extension/openshift_payload_hyperkube.json b/.openshift-tests-extension/openshift_payload_hyperkube.json
+index 23e86487fa5..3bd71b79810 100644
+--- a/.openshift-tests-extension/openshift_payload_hyperkube.json
++++ b/.openshift-tests-extension/openshift_payload_hyperkube.json
+@@ -80076,4 +80076,4 @@
+     "source": "openshift:payload:hyperkube",
+     "lifecycle": "blocking"
+   }
+-]
+\ No newline at end of file
++]
 diff --git a/DOWNSTREAM_OWNERS b/DOWNSTREAM_OWNERS
 index ad48a46ecdd..80caf1dc879 100644
 --- a/DOWNSTREAM_OWNERS
@@ -92,10 +105,10 @@ index d8485b53b88..898ce1c0c52 100755
    echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..6c188b5c85a
+index 00000000000..275cb62e76f
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
-@@ -0,0 +1,231 @@
+@@ -0,0 +1,228 @@
 +package main
 +
 +import (
@@ -272,9 +285,6 @@ index 00000000000..6c188b5c85a
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			"[sig-node] ImageCredentialProvider [Feature:KubeletCredentialProviders] should be able to create pod with image credentials fetched from external credential provider",
 +
-+			// Kevin to look into this
-+			"[Feature:OrderedNamespaceDeletion]",
-+
 +			// Jan will look into this
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743612984702079
 +			"[Feature:SchedulerAsyncPreemption]",
@@ -329,13 +339,17 @@ index 00000000000..6c188b5c85a
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go b/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
 new file mode 100644
-index 00000000000..825b2e7a4a7
+index 00000000000..ea9070d1624
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
-@@ -0,0 +1,235 @@
+@@ -0,0 +1,249 @@
 +package main
 +
-+import et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
++import (
++	"fmt"
++
++	et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
++)
 +
 +// addEnvironmentSelectors adds the environmentSelector field to appropriate specs to facilitate including or excluding
 +// them based on attributes of the cluster they are running on
@@ -351,11 +365,11 @@ index 00000000000..825b2e7a4a7
 +	specs.SelectAny([]et.SelectFunction{ // Since these must use "NameContainsAll" they cannot be included in filterByPlatform
 +		et.NameContainsAll("[sig-network] LoadBalancers [Feature:LoadBalancer]", "UDP"),
 +		et.NameContainsAll("[sig-network] LoadBalancers [Feature:LoadBalancer]", "session affinity"),
-+	}).Exclude(et.PlatformEquals("aws"))
++	}).Exclude(et.PlatformEquals("aws")).AddLabel("[Skipped:aws]")
 +
 +	specs.SelectAny([]et.SelectFunction{ // Since these must use "NameContainsAll" they cannot be included in filterByNetwork
 +		et.NameContainsAll("NetworkPolicy", "named port"),
-+	}).Exclude(et.NetworkEquals("OVNKubernetes"))
++	}).Exclude(et.NetworkEquals("OVNKubernetes")).AddLabel("[Skipped:Network/OVNKubernetes]")
 +}
 +
 +// filterByPlatform is a helper function to do, simple, "NameContains" filtering on tests by platform
@@ -462,7 +476,9 @@ index 00000000000..825b2e7a4a7
 +			selectFunctions = append(selectFunctions, et.NameContains(exclusion))
 +		}
 +
-+		specs.SelectAny(selectFunctions).Exclude(et.PlatformEquals(platform))
++		specs.SelectAny(selectFunctions).
++			Exclude(et.PlatformEquals(platform)).
++			AddLabel(fmt.Sprintf("[Skipped:%s]", platform))
 +	}
 +}
 +
@@ -504,7 +520,9 @@ index 00000000000..825b2e7a4a7
 +			selectFunctions = append(selectFunctions, et.NameContains(exclusion))
 +		}
 +
-+		specs.SelectAny(selectFunctions).Exclude(et.ExternalConnectivityEquals(externalConnectivity))
++		specs.SelectAny(selectFunctions).
++			Exclude(et.ExternalConnectivityEquals(externalConnectivity)).
++			AddLabel(fmt.Sprintf("[Skipped:%s]", externalConnectivity))
 +	}
 +}
 +
@@ -533,7 +551,9 @@ index 00000000000..825b2e7a4a7
 +			selectFunctions = append(selectFunctions, et.NameContains(exclusion))
 +		}
 +
-+		specs.SelectAny(selectFunctions).Exclude(et.TopologyEquals(topology))
++		specs.SelectAny(selectFunctions).
++			Exclude(et.TopologyEquals(topology)).
++			AddLabel(fmt.Sprintf("[Skipped:%s]", topology))
 +	}
 +}
 +
@@ -552,7 +572,9 @@ index 00000000000..825b2e7a4a7
 +	for _, exclusion := range exclusions {
 +		selectFunctions = append(selectFunctions, et.NameContains(exclusion))
 +	}
-+	specs.SelectAny(selectFunctions).Exclude(et.NoOptionalCapabilitiesExist())
++	specs.SelectAny(selectFunctions).
++		Exclude(et.NoOptionalCapabilitiesExist()).
++		AddLabel("[Skipped:NoOptionalCapabilities]")
 +}
 +
 +// filterByNetwork is a helper function to do, simple, "NameContains" filtering on tests by network
@@ -565,21 +587,26 @@ index 00000000000..825b2e7a4a7
 +			selectFunctions = append(selectFunctions, et.NameContains(exclusion))
 +		}
 +
-+		specs.SelectAny(selectFunctions).Exclude(et.NetworkEquals(network))
++		specs.SelectAny(selectFunctions).
++			Exclude(et.NetworkEquals(network)).
++			AddLabel(fmt.Sprintf("[Skipped:%s]", network))
 +	}
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
-index 03b626a827a..4eef0b4d7f6 100644
+index 03b626a827a..03dd0b7a661 100644
 --- a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
 +++ b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
-@@ -2,15 +2,17 @@ package main
+@@ -2,22 +2,26 @@ package main
  
  import (
  	"flag"
 -	"k8s.io/kubernetes/test/e2e/framework"
  	"os"
 +	"reflect"
++	"strconv"
 +
++	et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
++	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
 +	"k8s.io/kubernetes/test/e2e/framework"
  
  	"github.com/spf13/cobra"
@@ -588,19 +615,18 @@ index 03b626a827a..4eef0b4d7f6 100644
  	"github.com/openshift-eng/openshift-tests-extension/pkg/cmd"
  	e "github.com/openshift-eng/openshift-tests-extension/pkg/extension"
 -	"github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
-+	et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
  	g "github.com/openshift-eng/openshift-tests-extension/pkg/ginkgo"
  	v "github.com/openshift-eng/openshift-tests-extension/pkg/version"
  
-@@ -18,6 +20,7 @@ import (
+ 	"k8s.io/client-go/pkg/version"
  	utilflag "k8s.io/component-base/cli/flag"
  	"k8s.io/component-base/logs"
- 	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
+-	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
 +	"k8s.io/kubernetes/test/utils/image"
  
  	// initialize framework extensions
  	_ "k8s.io/kubernetes/test/e2e/framework/debug/init"
-@@ -64,6 +67,12 @@ func main() {
+@@ -64,6 +68,12 @@ func main() {
  		Qualifiers: []string{`labels.exists(l, l == "Serial") && labels.exists(l, l == "Conformance")`},
  	})
  
@@ -613,28 +639,40 @@ index 03b626a827a..4eef0b4d7f6 100644
  	//FIXME(stbenjam): what other suites does k8s-test contribute to?
  
  	// Build our specs from ginkgo
-@@ -87,12 +96,19 @@ func main() {
+@@ -87,11 +97,28 @@ func main() {
  	//		  the environmental skip code from the enhancement once its implemented.
  	//		- Make sure to account for test renames that occur because of removal of these
  	//		  annotations
 -	specs.Walk(func(spec *extensiontests.ExtensionTestSpec) {
-+	specs.Walk(func(spec *et.ExtensionTestSpec) {
- 		if annotations, ok := generated.Annotations[spec.Name]; ok {
- 			spec.Name += annotations
+-		if annotations, ok := generated.Annotations[spec.Name]; ok {
+-			spec.Name += annotations
++	var omitAnnotations bool
++	omitAnnotationsVal := os.Getenv("OMIT_ANNOTATIONS")
++	if omitAnnotationsVal != "" {
++		omitAnnotations, err = strconv.ParseBool(omitAnnotationsVal)
++		if err != nil {
++			panic("Failed to parse OMIT_ANNOTATIONS: " + err.Error())
  		}
- 	})
- 
+-	})
++	}
++	if !omitAnnotations {
++		specs.Walk(func(spec *et.ExtensionTestSpec) {
++			if annotations, ok := generated.Annotations[spec.Name]; ok {
++				spec.Name += annotations
++			}
++		})
++	}
++
 +	specs = filterOutDisabledSpecs(specs)
 +	addLabelsToSpecs(specs)
 +
 +	// EnvironmentSelectors added to the appropriate specs to facilitate including or excluding them
 +	// based on attributes of the cluster they are running on
 +	addEnvironmentSelectors(specs)
-+
+ 
  	kubeTestsExtension.AddSpecs(specs)
  
- 	// Cobra stuff
-@@ -110,3 +126,25 @@ func main() {
+@@ -110,3 +137,25 @@ func main() {
  		os.Exit(1)
  	}
  }
@@ -662,7 +700,7 @@ index 03b626a827a..4eef0b4d7f6 100644
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/labels.go b/openshift-hack/cmd/k8s-tests-ext/labels.go
 new file mode 100644
-index 00000000000..7932f2eb1b6
+index 00000000000..997937706cc
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/labels.go
 @@ -0,0 +1,52 @@
@@ -675,7 +713,7 @@ index 00000000000..7932f2eb1b6
 +func addLabelsToSpecs(specs et.ExtensionTestSpecs) {
 +	var namesByLabel = map[string][]string{
 +		// tests too slow to be part of conformance
-+		"Slow": {
++		"[Slow]": {
 +			"[sig-scalability]",                            // disable from the default set for now
 +			"should create and stop a working application", // Inordinately slow tests
 +
@@ -684,13 +722,13 @@ index 00000000000..7932f2eb1b6
 +			"validates that there exists conflict between pods with same hostPort and protocol but one using 0.0.0.0 hostIP", // 5m, really?
 +		},
 +		// tests that are known flaky
-+		"Flaky": {
++		"[Flaky]": {
 +			"Job should run a job to completion when tasks sometimes fail and are not locally restarted", // seems flaky, also may require too many resources
 +			// TODO(node): test works when run alone, but not in the suite in CI
 +			"[Feature:HPA] Horizontal pod autoscaling (scale resource: CPU) [sig-autoscaling] ReplicationController light Should scale from 1 pod to 2 pods",
 +		},
 +		// tests that must be run without competition
-+		"Serial": {
++		"[Serial]": {
 +			"[Disruptive]",
 +			"[Feature:Performance]", // requires isolation
 +
@@ -1200,7 +1238,7 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..279671894d1 100644
+index a62f99f1fd9..481e7cc3f8d 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -10,22 +10,19 @@ var (
@@ -1241,7 +1279,7 @@ index a62f99f1fd9..279671894d1 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -174,25 +174,20 @@ var (
+@@ -174,25 +174,17 @@ var (
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
  
@@ -1254,15 +1292,13 @@ index a62f99f1fd9..279671894d1 100644
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
-+			// Kevin to look into this
-+			`\[Feature:OrderedNamespaceDeletion\]`,
- 
--			// https://issues.redhat.com/browse/OCPBUGS-45273
--			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1743447032840259
 +			`\[Feature:UserNamespacesSupport\]`,
  
+-			// https://issues.redhat.com/browse/OCPBUGS-45273
+-			`\[sig-cli\] Kubectl Port forwarding Shutdown client connection while the remote stream is writing data to the port-forward connection port-forward should keep working after detect broken connection`,
+-
 -			// https://issues.redhat.com/browse/OCPBUGS-45274
 -			// https://github.com/kubernetes/kubernetes/issues/129056
 -			`\[sig-node\] PodRejectionStatus Kubelet should reject pod when the node didn't have enough resource`,
@@ -1278,7 +1314,7 @@ index a62f99f1fd9..279671894d1 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +257,11 @@ var (
+@@ -262,6 +254,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
@@ -1302,6 +1338,95 @@ index 48efbca4a3e..e0b481a17f0 100644
  
  	// test sources
  	_ "k8s.io/kubernetes/test/e2e/apimachinery"
+diff --git a/openshift-hack/e2e/kube_e2e_test.go b/openshift-hack/e2e/kube_e2e_test.go
+index 8356774e726..a99ea2ede4d 100644
+--- a/openshift-hack/e2e/kube_e2e_test.go
++++ b/openshift-hack/e2e/kube_e2e_test.go
+@@ -1,22 +1,22 @@
+ package e2e
+ 
+-//go:generate go run -mod vendor ./annotate/cmd -- ./annotate/generated/zz_generated.annotations.go
+-
+ // This file duplicates most of test/e2e/e2e_test.go but limits the included
+ // tests (via include.go) to tests that are relevant to openshift.
+ 
+ import (
+ 	"context"
++	"encoding/json"
+ 	"flag"
+ 	"fmt"
+ 	"math/rand"
+ 	"os"
++	"os/exec"
+ 	"strings"
+ 	"testing"
+ 	"time"
+ 
++	et "github.com/openshift-eng/openshift-tests-extension/pkg/extension/extensiontests"
+ 	"gopkg.in/yaml.v2"
+-
+ 	// Never, ever remove the line with "/ginkgo". Without it,
+ 	// the ginkgo test runner will not detect that this
+ 	// directory contains a Ginkgo test suite.
+@@ -35,9 +35,6 @@ import (
+ 	e2etestingmanifests "k8s.io/kubernetes/test/e2e/testing-manifests"
+ 	testfixtures "k8s.io/kubernetes/test/fixtures"
+ 	"k8s.io/kubernetes/test/utils/image"
+-
+-	// Ensure test annotation
+-	"k8s.io/kubernetes/openshift-hack/e2e/annotate/generated"
+ )
+ 
+ func TestMain(m *testing.M) {
+@@ -109,17 +106,43 @@ func TestMain(m *testing.M) {
+ }
+ 
+ func TestE2E(t *testing.T) {
+-	// TODO(soltysh): this is raw copy from end of openshift-hack/e2e/annotate/generated/zz_generated.annotations.go
+-	// https://issues.redhat.com/browse/OCPBUGS-25641
++	// In order to properly skip tests, we must add the labels that the OTE external binary supplies to the test name
++	// This will then be used by Ginkgo to skip specific tests
++	oteCmd := exec.Command("k8s-tests-ext", "list", "tests")
++	// We can't have OTE also add annotations to the spec names to map to labels, or they won't match the actual spec names
++	//TODO(sgoeddel): once annotation logic is removed, this can be as well
++	oteCmd.Env = append(oteCmd.Env, "OMIT_ANNOTATIONS=true")
++	oteCmd.Stderr = os.Stderr
++	output, err := oteCmd.Output()
++	if err != nil {
++		t.Fatalf("Error running ote list tests command: %v", err)
++	}
++	var specs et.ExtensionTestSpecs
++	if err = json.Unmarshal(output, &specs); err != nil {
++		t.Fatalf("Error parsing ote list tests output: %v", err)
++	}
++
++	nameToLabels := make(map[string][]string, len(specs))
++	for _, spec := range specs {
++		nameToLabels[spec.Name] = spec.Labels.UnsortedList()
++	}
++
+ 	ginkgo.GetSuite().SetAnnotateFn(func(name string, node types.TestSpec) {
+-		if newLabels, ok := generated.Annotations[name]; ok {
+-			node.AppendText(newLabels)
++		if newLabels, ok := nameToLabels[name]; ok {
++			for _, label := range newLabels {
++				// Only add the label to the name if it isn't already present to avoid test names that are too long
++				if !strings.Contains(name, label) {
++					node.AppendText(fmt.Sprintf(" %s", label))
++				}
++			}
+ 		} else {
+-			panic(fmt.Sprintf("unable to find test %s", name))
++			// If the name isn't found in the mapping, it is because the test has been disabled via OTE
++			node.AppendText(" [Disabled:missing]")
+ 		}
+ 		if strings.Contains(name, "Kubectl client Kubectl prune with applyset should apply and prune objects") {
+ 			fmt.Printf("Trying to annotate %q\n", name)
+ 		}
++
+ 	})
+ 
+ 	e2e.RunE2ETests(t)
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
 index fabdce0b9c0..22c75dcaacb 100644
 --- a/openshift-hack/images/hyperkube/Dockerfile.rhel
@@ -1420,20 +1545,51 @@ index 514b52eff28..b012db5a4d1 100755
  synced=false
  for count in $(seq 1 10); do
 diff --git a/openshift-hack/images/tests/Dockerfile.rhel b/openshift-hack/images/tests/Dockerfile.rhel
-index ff0b2fa6e1d..d9254eda59d 100644
+index ff0b2fa6e1d..3cd421bc12e 100644
 --- a/openshift-hack/images/tests/Dockerfile.rhel
 +++ b/openshift-hack/images/tests/Dockerfile.rhel
-@@ -1,4 +1,4 @@
+@@ -1,17 +1,20 @@
 -FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.23-openshift-4.19 AS builder
 +FROM registry.ci.openshift.org/ocp/builder:rhel-9-golang-1.24-nofips-openshift-4.19 AS builder
  WORKDIR /go/src/k8s.io/kubernetes
  COPY . .
  RUN make WHAT=openshift-hack/e2e/k8s-e2e.test; \
+     make WHAT=vendor/github.com/onsi/ginkgo/v2/ginkgo; \
++    make WHAT=openshift-hack/cmd/k8s-tests-ext; \
+     mkdir -p /tmp/build; \
+     cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/k8s-e2e.test /tmp/build/; \
+     cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/ginkgo /tmp/build/; \
++    cp /go/src/k8s.io/kubernetes/_output/local/bin/linux/$(go env GOARCH)/k8s-tests-ext /tmp/build/; \
+     cp /go/src/k8s.io/kubernetes/openshift-hack/test-kubernetes-e2e.sh /tmp/build/; \
+     cp /go/src/k8s.io/kubernetes/openshift-hack/images/kube-proxy/test-kube-proxy.sh /tmp/build/
+ 
+ FROM registry.ci.openshift.org/ocp/4.19:tools
+ COPY --from=builder /tmp/build/k8s-e2e.test /usr/bin/
+ COPY --from=builder /tmp/build/ginkgo /usr/bin/
++COPY --from=builder /tmp/build/k8s-tests-ext /usr/bin/
+ COPY --from=builder /tmp/build/test-kubernetes-e2e.sh /usr/bin/
+ COPY --from=builder /tmp/build/test-kube-proxy.sh /usr/bin/
+ RUN yum install --setopt=tsflags=nodocs -y git gzip util-linux && yum clean all && rm -rf /var/cache/yum/* && \
 diff --git a/openshift-hack/test-kubernetes-e2e.sh b/openshift-hack/test-kubernetes-e2e.sh
-index efa25590ee0..1b236b989eb 100755
+index efa25590ee0..b74bd86c12d 100755
 --- a/openshift-hack/test-kubernetes-e2e.sh
 +++ b/openshift-hack/test-kubernetes-e2e.sh
-@@ -85,6 +85,7 @@ ginkgo \
+@@ -54,12 +54,13 @@ esac
+ # -skip and -focus.
+ KUBE_E2E_TEST_ARGS="${KUBE_E2E_TEST_ARGS:-${DEFAULT_TEST_ARGS}}"
+ 
+-# k8s-e2e.test and ginkgo are expected to be in the path in
++# k8s-e2e.test, ginkgo, and k8s-tests-ext are expected to be in the path in
+ # CI. Outside of CI, ensure k8s-e2e.test and ginkgo are built and
+ # available in PATH.
+ if ! which k8s-e2e.test &> /dev/null; then
+   make WHAT=vendor/github.com/onsi/ginkgo/v2/ginkgo
+   make WHAT=openshift-hack/e2e/k8s-e2e.test
++  make WHAT=openshift-hack/cmd/k8s-tests-ext
+   ROOT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")/.."; pwd -P)"
+   PATH="${ROOT_PATH}/_output/local/bin/$(go env GOHOSTOS)/$(go env GOARCH):${PATH}"
+   export PATH
+@@ -85,6 +86,7 @@ ginkgo \
    --output-interceptor-mode=none \
    -nodes "${NODES}" -no-color ${KUBE_E2E_TEST_ARGS} \
    "$( which k8s-e2e.test )" -- \
