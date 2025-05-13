@@ -1,0 +1,44 @@
+From 2e77469256376221a9d70acb8b3789e80cd12f4f Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 12 May 2025 09:05:07 -0300
+Subject: [PATCH] UPSTREAM: 131409: test/e2e/node/kubelet_authz.go: fix SAR to
+ include SA groups
+
+---
+ test/e2e/framework/auth/helpers.go | 3 ++-
+ test/e2e/node/kubelet_authz.go     | 1 +
+ 2 files changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/test/e2e/framework/auth/helpers.go b/test/e2e/framework/auth/helpers.go
+index 6ef48ed3643..e64eda91e17 100644
+--- a/test/e2e/framework/auth/helpers.go
++++ b/test/e2e/framework/auth/helpers.go
+@@ -46,11 +46,12 @@ type bindingsGetter interface {
+ 
+ // WaitForAuthzUpdate checks if the give user can perform named verb and action
+ // on a resource or subresource.
+-func WaitForAuthzUpdate(ctx context.Context, c v1authorization.SubjectAccessReviewsGetter, user string, ra *authorizationv1.ResourceAttributes, allowed bool) error {
++func WaitForAuthzUpdate(ctx context.Context, c v1authorization.SubjectAccessReviewsGetter, user string, groups []string, ra *authorizationv1.ResourceAttributes, allowed bool) error {
+ 	review := &authorizationv1.SubjectAccessReview{
+ 		Spec: authorizationv1.SubjectAccessReviewSpec{
+ 			ResourceAttributes: ra,
+ 			User:               user,
++			Groups:             groups,
+ 		},
+ 	}
+ 
+diff --git a/test/e2e/node/kubelet_authz.go b/test/e2e/node/kubelet_authz.go
+index 0b15e54d892..75f311136c5 100644
+--- a/test/e2e/node/kubelet_authz.go
++++ b/test/e2e/node/kubelet_authz.go
+@@ -108,6 +108,7 @@ func runKubeletAuthzTest(ctx context.Context, f *framework.Framework, endpoint,
+ 
+ 	err = e2eauth.WaitForAuthzUpdate(ctx, f.ClientSet.AuthorizationV1(),
+ 		serviceaccount.MakeUsername(ns, saName),
++		append(serviceaccount.MakeGroupNames(ns), "system:authenticated"),
+ 		&authorizationv1.ResourceAttributes{
+ 			Namespace:   ns,
+ 			Verb:        verb,
+-- 
+2.49.0
+
