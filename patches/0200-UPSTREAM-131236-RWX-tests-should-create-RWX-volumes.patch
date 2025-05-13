@@ -1,0 +1,34 @@
+From cac217ab50b46da129566fc10c0152a918f4a169 Mon Sep 17 00:00:00 2001
+From: Jan Safranek <jsafrane@redhat.com>
+Date: Thu, 10 Apr 2025 12:48:25 +0200
+Subject: [PATCH] UPSTREAM: 131236: RWX tests should create RWX volumes
+
+The test that checks that a volume can be accessed from multiple nodes
+should create ReadWriteMany volume and not ReadWriteOnce.
+---
+ test/e2e/storage/testsuites/multivolume.go | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/test/e2e/storage/testsuites/multivolume.go b/test/e2e/storage/testsuites/multivolume.go
+index 1efd5fa5064..c1832b04d57 100644
+--- a/test/e2e/storage/testsuites/multivolume.go
++++ b/test/e2e/storage/testsuites/multivolume.go
+@@ -466,7 +466,14 @@ func (t *multiVolumeTestSuite) DefineTests(driver storageframework.TestDriver, p
+ 
+ 		// Create volume
+ 		testVolumeSizeRange := t.GetTestSuiteInfo().SupportedSizeRange
+-		resource := storageframework.CreateVolumeResource(ctx, l.driver, l.config, pattern, testVolumeSizeRange)
++		resource := storageframework.CreateVolumeResourceWithAccessModes(
++			ctx,
++			l.driver,
++			l.config,
++			pattern,
++			testVolumeSizeRange,
++			[]v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
++			nil /* vacName */)
+ 		l.resources = append(l.resources, resource)
+ 
+ 		// Test access to the volume from pods on different node
+-- 
+2.49.0
+
