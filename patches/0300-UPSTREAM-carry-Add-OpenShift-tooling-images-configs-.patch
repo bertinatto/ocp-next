@@ -1,4 +1,4 @@
-From 701b692e77ef3d816549e933bcb66de1119d5b4a Mon Sep 17 00:00:00 2001
+From 4464329f126f266de469217088681674d28667d4 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -10,7 +10,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  DOWNSTREAM_OWNERS                             |   4 +-
  build/pause/Dockerfile.Rhel                   |   2 +-
  hack/lib/golang.sh                            |   1 -
- .../cmd/k8s-tests-ext/disabled_tests.go       | 223 ++++++++++++++++
+ .../cmd/k8s-tests-ext/disabled_tests.go       | 220 ++++++++++++++++
  .../k8s-tests-ext/environment_selectors.go    | 249 ++++++++++++++++++
  openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  63 ++++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
@@ -18,7 +18,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 ----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  42 ++-
+ openshift-hack/e2e/annotate/rules.go          |  41 ++-
  openshift-hack/e2e/include.go                 |   1 -
  openshift-hack/e2e/kube_e2e_test.go           |  42 ++-
  .../images/hyperkube/Dockerfile.rhel          |   8 +-
@@ -27,7 +27,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   5 +-
  openshift-hack/test-kubernetes-e2e.sh         |   4 +-
- 22 files changed, 666 insertions(+), 517 deletions(-)
+ 22 files changed, 661 insertions(+), 518 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -105,10 +105,10 @@ index d8485b53b88..898ce1c0c52 100755
    echo "${targets[@]}"
 diff --git a/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
 new file mode 100644
-index 00000000000..7d55593719f
+index 00000000000..e37549f3732
 --- /dev/null
 +++ b/openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
-@@ -0,0 +1,223 @@
+@@ -0,0 +1,220 @@
 +package main
 +
 +import (
@@ -284,9 +284,6 @@ index 00000000000..7d55593719f
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-17194
 +			"[sig-node] ImageCredentialProvider [Feature:KubeletCredentialProviders] should be able to create pod with image credentials fetched from external credential provider",
-+
-+			// Kevin to look into
-+			"[Feature:OrderedNamespaceDeletion]",
 +
 +			// Requires flipping the gate in o/api after branch cut
 +			// https://redhat-internal.slack.com/archives/C08KA82J2JF/p1744285107158659?thread_ts=1743190159.388209&cid=C08KA82J2JF
@@ -1233,7 +1230,7 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..adf2c9ee263 100644
+index a62f99f1fd9..428a87c7585 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
 @@ -10,22 +10,19 @@ var (
@@ -1274,16 +1271,14 @@ index a62f99f1fd9..adf2c9ee263 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -174,25 +174,12 @@ var (
+@@ -174,25 +174,9 @@ var (
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
  
 -			// https://issues.redhat.com/browse/OCPBUGS-45214
 -			// Even though this feature is not GA in k/k, it will be GA in OCP 4.19, so we should fix it and unskip this test
 -			`\[Feature:volumegroupsnapshot\]`,
-+			// Kevin to look into
-+			`\[Feature:OrderedNamespaceDeletion\]`,
- 
+-
 -			// https://issues.redhat.com/browse/OCPBUGS-45273
 -			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
 -
@@ -1305,7 +1300,7 @@ index a62f99f1fd9..adf2c9ee263 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +249,11 @@ var (
+@@ -262,6 +246,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
