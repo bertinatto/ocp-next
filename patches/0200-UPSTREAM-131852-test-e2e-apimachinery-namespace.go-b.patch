@@ -1,0 +1,50 @@
+From f4f19668462eec35edfec83d4810df755de009d5 Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 19 May 2025 15:32:36 -0300
+Subject: [PATCH] UPSTREAM: 131852: test/e2e/apimachinery/namespace.go: bump 
+ OrderedNamespaceDeletion test timeouts
+
+---
+ test/e2e/apimachinery/namespace.go | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/test/e2e/apimachinery/namespace.go b/test/e2e/apimachinery/namespace.go
+index 7c3910af1f0..fbfa7c312f6 100644
+--- a/test/e2e/apimachinery/namespace.go
++++ b/test/e2e/apimachinery/namespace.go
+@@ -20,11 +20,12 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
+-	"k8s.io/kubernetes/pkg/features"
+ 	"strings"
+ 	"sync"
+ 	"time"
+ 
++	"k8s.io/kubernetes/pkg/features"
++
+ 	v1 "k8s.io/api/core/v1"
+ 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+@@ -541,7 +542,7 @@ func ensurePodsAreRemovedFirstInOrderedNamespaceDeletion(ctx context.Context, f
+ 	// wait 10 seconds to allow the namespace controller to process
+ 	time.Sleep(10 * time.Second)
+ 	ginkgo.By("the pod should be deleted before processing deletion for other resources")
+-	framework.ExpectNoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, 60*time.Second, true,
++	framework.ExpectNoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, 5*time.Minute, true,
+ 		func(ctx context.Context) (bool, error) {
+ 			_, err = f.ClientSet.CoreV1().ConfigMaps(nsName).Get(ctx, configMapName, metav1.GetOptions{})
+ 			framework.ExpectNoError(err, "configmap %q should still exist in namespace %q", configMapName, nsName)
+@@ -587,8 +588,7 @@ func ensurePodsAreRemovedFirstInOrderedNamespaceDeletion(ctx context.Context, f
+ 	framework.ExpectNoError(err, "failed to update pod %q and remove finalizer in namespace %q", podName, nsName)
+ 
+ 	ginkgo.By("Waiting for the namespace to be removed.")
+-	maxWaitSeconds := int64(60) + *pod.Spec.TerminationGracePeriodSeconds
+-	framework.ExpectNoError(wait.PollUntilContextTimeout(ctx, 1*time.Second, time.Duration(maxWaitSeconds)*time.Second, true,
++	framework.ExpectNoError(wait.PollUntilContextTimeout(ctx, 2*time.Second, 5*time.Minute, true,
+ 		func(ctx context.Context) (bool, error) {
+ 			_, err = f.ClientSet.CoreV1().Namespaces().Get(ctx, namespace.Name, metav1.GetOptions{})
+ 			if err != nil && apierrors.IsNotFound(err) {
+-- 
+2.49.0
+
