@@ -1,0 +1,31 @@
+From 209da68e7202224b57cdb365c7156249e807ea0d Mon Sep 17 00:00:00 2001
+From: Ben Luddy <bluddy@redhat.com>
+Date: Fri, 9 May 2025 16:53:09 -0400
+Subject: [PATCH] UPSTREAM: <carry>: unrevert: Mark
+ admissionregistration.k8s.io/v1beta1 as deprecated."
+
+This reverts commit 24bf6d5c82350ad98b9ebd61f392b35474d24630.
+---
+ .../filters/apirequestcount/deprecated.go                   | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/openshift-kube-apiserver/filters/apirequestcount/deprecated.go b/openshift-kube-apiserver/filters/apirequestcount/deprecated.go
+index 060cc380db5..edceb3c9bd0 100644
+--- a/openshift-kube-apiserver/filters/apirequestcount/deprecated.go
++++ b/openshift-kube-apiserver/filters/apirequestcount/deprecated.go
+@@ -9,6 +9,12 @@ import (
+ var DeprecatedAPIRemovedRelease = map[schema.GroupVersionResource]uint{
+ 	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta3", Resource: "flowschemas"}:                 32,
+ 	{Group: "flowcontrol.apiserver.k8s.io", Version: "v1beta3", Resource: "prioritylevelconfigurations"}: 32,
++
++	// 4.17 shipped with admissionregistration.k8s.io/v1beta1 served under the default featureset.
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "validatingwebhookconfigurations"}:   33,
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "mutatingwebhookconfigurations"}:     33,
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "validatingadmissionpolicies"}:       33,
++	{Group: "admissionregistration.k8s.io", Version: "v1beta1", Resource: "validatingadmissionpolicybindings"}: 33,
+ }
+ 
+ // removedRelease of a specified resource.version.group.
+-- 
+2.49.0
+

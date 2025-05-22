@@ -1,0 +1,40 @@
+From c64d8009f03f8bf09f004f4b0e2f615c205b27fc Mon Sep 17 00:00:00 2001
+From: Fabio Bertinatto <fbertina@redhat.com>
+Date: Mon, 19 May 2025 15:32:36 -0300
+Subject: [PATCH] UPSTREAM: 131852: test/e2e/apimachinery/namespace.go: make
+ OrderedNamespaceDeletion test serial
+
+---
+ test/e2e/apimachinery/namespace.go | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/test/e2e/apimachinery/namespace.go b/test/e2e/apimachinery/namespace.go
+index 7c3910af1f0..ed2da86eed0 100644
+--- a/test/e2e/apimachinery/namespace.go
++++ b/test/e2e/apimachinery/namespace.go
+@@ -20,11 +20,12 @@ import (
+ 	"context"
+ 	"encoding/json"
+ 	"fmt"
+-	"k8s.io/kubernetes/pkg/features"
+ 	"strings"
+ 	"sync"
+ 	"time"
+ 
++	"k8s.io/kubernetes/pkg/features"
++
+ 	v1 "k8s.io/api/core/v1"
+ 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+@@ -481,7 +482,7 @@ var _ = SIGDescribe("OrderedNamespaceDeletion", func() {
+ 	f := framework.NewDefaultFramework("namespacedeletion")
+ 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
+ 
+-	f.It("namespace deletion should delete pod first", feature.OrderedNamespaceDeletion, framework.WithFeatureGate(features.OrderedNamespaceDeletion), func(ctx context.Context) {
++	f.It("namespace deletion should delete pod first", feature.OrderedNamespaceDeletion, framework.WithFeatureGate(features.OrderedNamespaceDeletion), framework.WithSerial(), func(ctx context.Context) {
+ 		ensurePodsAreRemovedFirstInOrderedNamespaceDeletion(ctx, f)
+ 	})
+ })
+-- 
+2.49.0
+
