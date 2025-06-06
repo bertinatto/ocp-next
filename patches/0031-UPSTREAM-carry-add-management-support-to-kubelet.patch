@@ -1,4 +1,4 @@
-From 5ec00fca3b032bb49f49b92fda9e7090b919dbe2 Mon Sep 17 00:00:00 2001
+From cc7bbc1d13706326e5e4caead4186f4a015b17a1 Mon Sep 17 00:00:00 2001
 From: Ryan Phillips <ryan@trolocsis.com>
 Date: Mon, 29 Mar 2021 12:02:13 -0500
 Subject: [PATCH] UPSTREAM: <carry>: add management support to kubelet
@@ -50,7 +50,7 @@ Signed-off-by: ehila <ehila@redhat.com>
 ---
  pkg/kubelet/cm/cpumanager/cpu_manager.go      |   6 +
  pkg/kubelet/cm/cpumanager/policy_static.go    |  22 +-
- .../cm/cpumanager/policy_static_test.go       |  52 +-
+ .../cm/cpumanager/policy_static_test.go       |  51 +-
  pkg/kubelet/cm/qos_container_manager_linux.go |   4 +
  pkg/kubelet/config/file.go                    |  11 +
  pkg/kubelet/kubelet.go                        |   5 +
@@ -58,7 +58,7 @@ Signed-off-by: ehila <ehila@redhat.com>
  pkg/kubelet/managed/cpu_shares.go             |  30 +
  pkg/kubelet/managed/managed.go                | 204 ++++++
  pkg/kubelet/managed/managed_test.go           | 675 ++++++++++++++++++
- 10 files changed, 1019 insertions(+), 17 deletions(-)
+ 10 files changed, 1018 insertions(+), 17 deletions(-)
  create mode 100644 pkg/kubelet/managed/cpu_shares.go
  create mode 100644 pkg/kubelet/managed/managed.go
  create mode 100644 pkg/kubelet/managed/managed_test.go
@@ -150,7 +150,7 @@ index 28591c5baf1..d6fc1f12142 100644
  
  	return nil
 diff --git a/pkg/kubelet/cm/cpumanager/policy_static_test.go b/pkg/kubelet/cm/cpumanager/policy_static_test.go
-index db3a3649b56..f1f74a93bad 100644
+index db3a3649b56..9fbf955e572 100644
 --- a/pkg/kubelet/cm/cpumanager/policy_static_test.go
 +++ b/pkg/kubelet/cm/cpumanager/policy_static_test.go
 @@ -21,6 +21,8 @@ import (
@@ -196,7 +196,7 @@ index db3a3649b56..f1f74a93bad 100644
  }
  
  func TestStaticPolicyStartWithResvList(t *testing.T) {
-@@ -1046,9 +1049,32 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
+@@ -1046,9 +1049,31 @@ func TestStaticPolicyStartWithResvList(t *testing.T) {
  			stDefaultCPUSet: cpuset.New(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
  			expNewErr:       fmt.Errorf("[cpumanager] unable to reserve the required amount of CPUs (size of 0-1 did not equal 1)"),
  		},
@@ -225,7 +225,6 @@ index db3a3649b56..f1f74a93bad 100644
 +			defer func() {
 +				managed.TestOnlySetEnabled(wasManaged)
 +			}()
-+			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, pkgfeatures.CPUManagerPolicyAlphaOptions, true)
  			p, err := NewStaticPolicy(testCase.topo, testCase.numReservedCPUs, testCase.reserved, topologymanager.NewFakeManager(), testCase.cpuPolicyOptions)
  			if !reflect.DeepEqual(err, testCase.expNewErr) {
  				t.Errorf("StaticPolicy Start() error (%v). expected error: %v but got: %v",

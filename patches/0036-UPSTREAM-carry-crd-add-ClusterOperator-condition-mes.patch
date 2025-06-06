@@ -1,10 +1,14 @@
-From 771ffc186a0762432540930f59281cbd15b0dd4a Mon Sep 17 00:00:00 2001
+From c9bab1bc96ed8a9325fd3e1fce8b8e9df58971bf Mon Sep 17 00:00:00 2001
 From: "Dr. Stefan Schimanski" <stefan.schimanski@gmail.com>
 Date: Wed, 16 Jun 2021 15:24:25 +0200
 Subject: [PATCH] UPSTREAM: <carry>: crd: add ClusterOperator condition message
  table column
 
-The logic is not exressible via JSONPath. Hence, if we want this, we have to help a little with this custom column writer.
+The logic is not exressible via JSONPath. Hence, if we want this, we
+have to help a little with this custom column writer.
+
+This might be solved by
+https://github.com/kubernetes/enhancements/issues/4595 once that's implemented.
 
 OpenShift-Rebase-Source: 633a422a2cf
 ---
@@ -16,7 +20,7 @@ OpenShift-Rebase-Source: 633a422a2cf
  create mode 100644 staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor/patch_clusteroperators.go
 
 diff --git a/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go b/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
-index 55d31fc8eda..ecd70b1c5ca 100644
+index 9afeb2f80ce..6f22f46bd95 100644
 --- a/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
 +++ b/staging/src/k8s.io/apiextensions-apiserver/pkg/apiserver/customresource_handler.go
 @@ -807,7 +807,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
@@ -28,7 +32,7 @@ index 55d31fc8eda..ecd70b1c5ca 100644
  		if err != nil {
  			klog.V(2).Infof("The CRD for %v has an invalid printer specification, falling back to default printing: %v", kind, err)
  		}
-@@ -959,7 +959,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
+@@ -966,7 +966,7 @@ func (r *crdHandler) getOrCreateServingInfoFor(uid types.UID, name string) (*crd
  		if err != nil {
  			return nil, fmt.Errorf("the server could not properly serve the CR scale subresource columns %w", err)
  		}
@@ -38,7 +42,7 @@ index 55d31fc8eda..ecd70b1c5ca 100644
  		// override scale subresource values
  		// shallow copy
 diff --git a/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/etcd_test.go b/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/etcd_test.go
-index a0c364f1b3f..2ccdea5233f 100644
+index e5df87be2c7..c64fc4bbf94 100644
 --- a/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/etcd_test.go
 +++ b/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/etcd_test.go
 @@ -90,7 +90,7 @@ func newStorage(t *testing.T) (customresource.CustomResourceStorage, *etcd3testi
@@ -48,7 +52,7 @@ index a0c364f1b3f..2ccdea5233f 100644
 -	table, _ := tableconvertor.New(headers)
 +	table, _ := tableconvertor.New(headers, schema.GroupVersionKind{Group: "mygroup.example.com", Version: "v1beta1", Kind: "NoxuItemList"})
  
- 	storage := customresource.NewStorage(
+ 	storage, err := customresource.NewStorage(
  		groupResource,
 diff --git a/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor/patch_clusteroperators.go b/staging/src/k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor/patch_clusteroperators.go
 new file mode 100644
@@ -188,5 +192,5 @@ index 8d933ca953d..8828e5ed6d1 100644
  
  type columnPrinter interface {
 -- 
-2.47.1
+2.49.0
 

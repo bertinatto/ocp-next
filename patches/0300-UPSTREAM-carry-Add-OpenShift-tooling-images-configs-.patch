@@ -1,4 +1,4 @@
-From 0299632b8bd44a027b55e4e414a5dafb5b44580b Mon Sep 17 00:00:00 2001
+From 98c928a05e2f1de75838faaa8bb5b9c2c001ae5b Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -12,13 +12,14 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  hack/lib/golang.sh                            |   1 -
  .../cmd/k8s-tests-ext/disabled_tests.go       | 216 +++++++++++++++
  .../k8s-tests-ext/environment_selectors.go    | 249 ++++++++++++++++++
- openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  63 ++++-
+ openshift-hack/cmd/k8s-tests-ext/k8s-tests.go |  69 ++++-
  openshift-hack/cmd/k8s-tests-ext/labels.go    |  52 ++++
+ openshift-hack/cmd/k8s-tests-ext/provider.go  |  89 ++++---
  openshift-hack/cmd/k8s-tests/k8s-tests.go     |  98 -------
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 ----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  39 +--
+ openshift-hack/e2e/annotate/rules.go          |  29 +-
  openshift-hack/e2e/include.go                 |   1 -
  openshift-hack/e2e/kube_e2e_test.go           |  42 ++-
  .../images/hyperkube/Dockerfile.rhel          |   8 +-
@@ -27,7 +28,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   5 +-
  openshift-hack/test-kubernetes-e2e.sh         |   4 +-
- 22 files changed, 654 insertions(+), 519 deletions(-)
+ 23 files changed, 705 insertions(+), 553 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -581,7 +582,7 @@ index 00000000000..ea9070d1624
 +	}
 +}
 diff --git a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
-index 03b626a827a..03dd0b7a661 100644
+index 03b626a827a..ace5bd2fc19 100644
 --- a/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
 +++ b/openshift-hack/cmd/k8s-tests-ext/k8s-tests.go
 @@ -2,22 +2,26 @@ package main
@@ -614,7 +615,18 @@ index 03b626a827a..03dd0b7a661 100644
  
  	// initialize framework extensions
  	_ "k8s.io/kubernetes/test/e2e/framework/debug/init"
-@@ -64,6 +68,12 @@ func main() {
+@@ -34,6 +38,10 @@ func main() {
+ 	framework.RegisterCommonFlags(flag.CommandLine)
+ 	framework.RegisterClusterFlags(flag.CommandLine)
+ 
++	if err := initializeCommonTestFramework(); err != nil {
++		panic(err)
++	}
++
+ 	// Get version info from kube
+ 	kubeVersion := version.Get()
+ 	v.GitTreeState = kubeVersion.GitTreeState
+@@ -64,6 +72,12 @@ func main() {
  		Qualifiers: []string{`labels.exists(l, l == "Serial") && labels.exists(l, l == "Conformance")`},
  	})
  
@@ -627,7 +639,16 @@ index 03b626a827a..03dd0b7a661 100644
  	//FIXME(stbenjam): what other suites does k8s-test contribute to?
  
  	// Build our specs from ginkgo
-@@ -87,11 +97,28 @@ func main() {
+@@ -74,7 +88,7 @@ func main() {
+ 
+ 	// Initialization for kube ginkgo test framework needs to run before all tests execute
+ 	specs.AddBeforeAll(func() {
+-		if err := initializeTestFramework(os.Getenv("TEST_PROVIDER")); err != nil {
++		if err := updateTestFrameworkForTests(os.Getenv("TEST_PROVIDER")); err != nil {
+ 			panic(err)
+ 		}
+ 	})
+@@ -87,11 +101,28 @@ func main() {
  	//		  the environmental skip code from the enhancement once its implemented.
  	//		- Make sure to account for test renames that occur because of removal of these
  	//		  annotations
@@ -660,7 +681,7 @@ index 03b626a827a..03dd0b7a661 100644
  
  	kubeTestsExtension.AddSpecs(specs)
  
-@@ -110,3 +137,25 @@ func main() {
+@@ -110,3 +141,25 @@ func main() {
  		os.Exit(1)
  	}
  }
@@ -744,6 +765,125 @@ index 00000000000..997937706cc
 +		specs.SelectAny(selectFunctions).AddLabel(label)
 +	}
 +}
+diff --git a/openshift-hack/cmd/k8s-tests-ext/provider.go b/openshift-hack/cmd/k8s-tests-ext/provider.go
+index cdc948a45c6..a60b658e16d 100644
+--- a/openshift-hack/cmd/k8s-tests-ext/provider.go
++++ b/openshift-hack/cmd/k8s-tests-ext/provider.go
+@@ -30,9 +30,41 @@ import (
+ 	_ "k8s.io/kubernetes/test/e2e/lifecycle"
+ )
+ 
+-// copied directly from github.com/openshift/origin/cmd/openshift-tests/provider.go
+-// and github.com/openshift/origin/test/extended/util/test.go
+-func initializeTestFramework(provider string) error {
++// Initialize a good enough test context for generating e2e tests,
++// so they can be listed and filtered.
++func initializeCommonTestFramework() error {
++	// update testContext with loaded config
++	testContext := &framework.TestContext
++	testContext.AllowedNotReadyNodes = -1
++	testContext.MinStartupPods = -1
++	testContext.MaxNodesToGather = 0
++	testContext.KubeConfig = os.Getenv("KUBECONFIG")
++
++	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
++		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
++	}
++
++	testContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
++	testContext.VerifyServiceAccount = true
++	testfiles.AddFileSource(e2etestingmanifests.GetE2ETestingManifestsFS())
++	testfiles.AddFileSource(testfixtures.GetTestFixturesFS())
++	testfiles.AddFileSource(conformancetestdata.GetConformanceTestdataFS())
++	testContext.KubectlPath = "kubectl"
++	// context.KubeConfig = KubeConfigPath()
++	testContext.KubeConfig = os.Getenv("KUBECONFIG")
++
++	// "debian" is used when not set. At least GlusterFS tests need "custom".
++	// (There is no option for "rhel" or "centos".)
++	testContext.NodeOSDistro = "custom"
++	testContext.MasterOSDistro = "custom"
++
++	return nil
++}
++
++// Finish test context initialization. This is called before a real test is going to run.
++// It parses the cloud provider and file other parameters that are needed for running
++// already generated tests.
++func updateTestFrameworkForTests(provider string) error {
+ 	providerInfo := &ClusterConfiguration{}
+ 	if err := json.Unmarshal([]byte(provider), &providerInfo); err != nil {
+ 		return fmt.Errorf("provider must be a JSON object with the 'type' key at a minimum: %v", err)
+@@ -58,39 +90,13 @@ func initializeTestFramework(provider string) error {
+ 		MultiZone:   config.MultiZone,
+ 		ConfigFile:  config.ConfigFile,
+ 	}
+-	testContext.AllowedNotReadyNodes = -1
+-	testContext.MinStartupPods = -1
+-	testContext.MaxNodesToGather = 0
+-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
+ 
+-	// allow the CSI tests to access test data, but only briefly
+-	// TODO: ideally CSI would not use any of these test methods
+-	// var err error
+-	// exutil.WithCleanup(func() { err = initCSITests(dryRun) })
+-	// TODO: for now I'm only initializing CSI directly, but we probably need that
+-	// WithCleanup here as well
+-	if err := initCSITests(); err != nil {
+-		return err
++	// these constants are taken from kube e2e and used by tests
++	testContext.IPFamily = "ipv4"
++	if config.HasIPv6 && !config.HasIPv4 {
++		testContext.IPFamily = "ipv6"
+ 	}
+ 
+-	if ad := os.Getenv("ARTIFACT_DIR"); len(strings.TrimSpace(ad)) == 0 {
+-		os.Setenv("ARTIFACT_DIR", filepath.Join(os.TempDir(), "artifacts"))
+-	}
+-
+-	testContext.DeleteNamespace = os.Getenv("DELETE_NAMESPACE") != "false"
+-	testContext.VerifyServiceAccount = true
+-	testfiles.AddFileSource(e2etestingmanifests.GetE2ETestingManifestsFS())
+-	testfiles.AddFileSource(testfixtures.GetTestFixturesFS())
+-	testfiles.AddFileSource(conformancetestdata.GetConformanceTestdataFS())
+-	testContext.KubectlPath = "kubectl"
+-	// context.KubeConfig = KubeConfigPath()
+-	testContext.KubeConfig = os.Getenv("KUBECONFIG")
+-
+-	// "debian" is used when not set. At least GlusterFS tests need "custom".
+-	// (There is no option for "rhel" or "centos".)
+-	testContext.NodeOSDistro = "custom"
+-	testContext.MasterOSDistro = "custom"
+-
+ 	// load and set the host variable for kubectl
+ 	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(&clientcmd.ClientConfigLoadingRules{ExplicitPath: testContext.KubeConfig}, &clientcmd.ConfigOverrides{})
+ 	cfg, err := clientConfig.ClientConfig()
+@@ -108,15 +114,18 @@ func initializeTestFramework(provider string) error {
+ 
+ 	framework.AfterReadingAllFlags(testContext)
+ 	testContext.DumpLogsOnFailure = true
+-
+-	// these constants are taken from kube e2e and used by tests
+-	testContext.IPFamily = "ipv4"
+-	if config.HasIPv6 && !config.HasIPv4 {
+-		testContext.IPFamily = "ipv6"
+-	}
+-
+ 	testContext.ReportDir = os.Getenv("TEST_JUNIT_DIR")
+ 
++	// allow the CSI tests to access test data, but only briefly
++	// TODO: ideally CSI would not use any of these test methods
++	// var err error
++	// exutil.WithCleanup(func() { err = initCSITests(dryRun) })
++	// TODO: for now I'm only initializing CSI directly, but we probably need that
++	// WithCleanup here as well
++	if err := initCSITests(); err != nil {
++		return err
++	}
++
+ 	return nil
+ }
+ 
 diff --git a/openshift-hack/cmd/k8s-tests/k8s-tests.go b/openshift-hack/cmd/k8s-tests/k8s-tests.go
 deleted file mode 100644
 index fedd8b16f01..00000000000
@@ -1226,48 +1366,28 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..b6041be43cf 100644
+index a62f99f1fd9..d8674782941 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -10,22 +10,19 @@ var (
- 		// alpha features that are not gated
- 		"[Disabled:Alpha]": {
- 			`\[Feature:StorageVersionAPI\]`,
--			`\[Feature:InPlacePodVerticalScaling\]`,
--			`\[Feature:ServiceCIDRs\]`,
- 			`\[Feature:ClusterTrustBundle\]`,
- 			`\[Feature:SELinuxMount\]`,
- 			`\[FeatureGate:SELinuxMount\]`,
- 			`\[Feature:UserNamespacesPodSecurityStandards\]`,
--			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
- 			`\[Feature:DynamicResourceAllocation\]`,
- 			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
- 			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`, // Alpha feature since k8s 1.27
- 			// 4.19
- 			`\[Feature:PodLevelResources\]`,
--			`\[Feature:SchedulerAsyncPreemption\]`,
--			`\[Feature:RelaxedDNSSearchValidation\]`,
+@@ -26,6 +26,7 @@ var (
+ 			`\[Feature:RelaxedDNSSearchValidation\]`,
  			`\[Feature:PodLogsQuerySplitStreams\]`,
--			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
-+			// 4.20
-+			`\[Feature:OffByDefault\]`,
-+			`\[Feature:CBOR\]`,
+ 			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
++			`\[Feature:OrderedNamespaceDeletion\]`, // disabled Beta
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -161,7 +158,10 @@ var (
- 			`\[sig-node\] \[Feature:PodLifecycleSleepAction\] when create a pod with lifecycle hook using sleep action valid prestop hook using sleep action`,
+@@ -162,6 +163,9 @@ var (
  
  			// https://issues.redhat.com/browse/OCPBUGS-38839
--			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
-+			`\[sig-network\] Traffic Distribution`,
+ 			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
 +
 +			// https://issues.redhat.com/browse/OCPBUGS-45273
 +			`\[sig-network\] Services should implement NodePort and HealthCheckNodePort correctly when ExternalTrafficPolicy changes`,
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -173,26 +173,6 @@ var (
+@@ -173,26 +177,6 @@ var (
  
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
@@ -1294,7 +1414,7 @@ index a62f99f1fd9..b6041be43cf 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +242,11 @@ var (
+@@ -262,6 +246,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
@@ -1400,7 +1520,7 @@ index 8356774e726..de60ab2e273 100644
  
  	e2e.RunE2ETests(t)
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
-index fabdce0b9c0..22c75dcaacb 100644
+index fabdce0b9c0..838757c2c81 100644
 --- a/openshift-hack/images/hyperkube/Dockerfile.rhel
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
 @@ -1,10 +1,10 @@
@@ -1423,7 +1543,7 @@ index fabdce0b9c0..22c75dcaacb 100644
        io.openshift.tags="openshift,hyperkube" \
 -      io.openshift.build.versions="kubernetes=1.32.1"
 \ No newline at end of file
-+      io.openshift.build.versions="kubernetes=1.33.0"
++      io.openshift.build.versions="kubernetes=1.33.1"
 \ No newline at end of file
 diff --git a/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel b/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel
 index fb57a6042fe..ecf3d1828a9 100644

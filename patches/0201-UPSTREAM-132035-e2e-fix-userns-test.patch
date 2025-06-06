@@ -1,0 +1,26 @@
+From 4327b5feba7ddd784300930792fc24ea276fbec0 Mon Sep 17 00:00:00 2001
+From: Peter Hunt <pehunt@redhat.com>
+Date: Fri, 30 May 2025 13:32:50 -0400
+Subject: [PATCH] UPSTREAM: 132035: e2e: fix userns test
+
+After creating two pods, we need to ensure we wait on each to be ready before we collect their logs
+---
+ test/e2e/common/node/security_context.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/test/e2e/common/node/security_context.go b/test/e2e/common/node/security_context.go
+index 6d34d1e372c..88c8aaca7e4 100644
+--- a/test/e2e/common/node/security_context.go
++++ b/test/e2e/common/node/security_context.go
+@@ -102,7 +102,7 @@ var _ = SIGDescribe("Security Context", func() {
+ 				podClient.DeleteSync(ctx, createdPod2.Name, metav1.DeleteOptions{}, f.Timeouts.PodDelete)
+ 			})
+ 			getLogs := func(pod *v1.Pod) (string, error) {
+-				err := e2epod.WaitForPodSuccessInNamespaceTimeout(ctx, f.ClientSet, createdPod1.Name, f.Namespace.Name, f.Timeouts.PodStart)
++				err := e2epod.WaitForPodSuccessInNamespaceTimeout(ctx, f.ClientSet, pod.Name, f.Namespace.Name, f.Timeouts.PodStart)
+ 				if err != nil {
+ 					return "", err
+ 				}
+-- 
+2.49.0
+
