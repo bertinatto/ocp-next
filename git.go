@@ -116,7 +116,11 @@ func (g *GitWrapper) Clean() error {
 }
 
 func (g *GitWrapper) Fetch(remote, branch string) error {
-	return g.runGit("fetch", remote, branch)
+	args := []string{"fetch", remote}
+	if branch != "" {
+		args = append(args, branch)
+	}
+	return g.runGit(args...)
 }
 
 func (g *GitWrapper) FetchAll() error {
