@@ -1,4 +1,4 @@
-From fd94973289b58668b4c7371290c1a69b870f9dba Mon Sep 17 00:00:00 2001
+From f9d22f46c8333a0e3932780a152ca176dd379ab1 Mon Sep 17 00:00:00 2001
 From: Fabio Bertinatto <fbertina@redhat.com>
 Date: Wed, 22 Jan 2025 09:59:33 +0100
 Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
@@ -19,7 +19,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  openshift-hack/cmd/k8s-tests/provider.go      | 147 -----------
  openshift-hack/cmd/k8s-tests/runtest.go       | 143 ----------
  openshift-hack/cmd/k8s-tests/types.go         |  69 -----
- openshift-hack/e2e/annotate/rules.go          |  29 +-
+ openshift-hack/e2e/annotate/rules.go          |  38 +--
  openshift-hack/e2e/include.go                 |   1 -
  openshift-hack/e2e/kube_e2e_test.go           |  42 ++-
  .../images/hyperkube/Dockerfile.rhel          |  10 +-
@@ -28,7 +28,7 @@ Subject: [PATCH] UPSTREAM: <carry>: Add OpenShift tooling, images, configs and
  .../images/kube-proxy/test-kube-proxy.sh      |  14 +-
  openshift-hack/images/tests/Dockerfile.rhel   |   7 +-
  openshift-hack/test-kubernetes-e2e.sh         |   4 +-
- 23 files changed, 753 insertions(+), 562 deletions(-)
+ 23 files changed, 755 insertions(+), 569 deletions(-)
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/disabled_tests.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/environment_selectors.go
  create mode 100644 openshift-hack/cmd/k8s-tests-ext/labels.go
@@ -1434,18 +1434,36 @@ index 29a0b5b5efa..00000000000
 -	return fmt.Sprintf("exit with code %d", e.Code)
 -}
 diff --git a/openshift-hack/e2e/annotate/rules.go b/openshift-hack/e2e/annotate/rules.go
-index a62f99f1fd9..d8674782941 100644
+index a62f99f1fd9..3216a5970de 100644
 --- a/openshift-hack/e2e/annotate/rules.go
 +++ b/openshift-hack/e2e/annotate/rules.go
-@@ -26,6 +26,7 @@ var (
- 			`\[Feature:RelaxedDNSSearchValidation\]`,
+@@ -10,22 +10,18 @@ var (
+ 		// alpha features that are not gated
+ 		"[Disabled:Alpha]": {
+ 			`\[Feature:StorageVersionAPI\]`,
+-			`\[Feature:InPlacePodVerticalScaling\]`,
+-			`\[Feature:ServiceCIDRs\]`,
+ 			`\[Feature:ClusterTrustBundle\]`,
+ 			`\[Feature:SELinuxMount\]`,
+ 			`\[FeatureGate:SELinuxMount\]`,
+-			`\[Feature:UserNamespacesPodSecurityStandards\]`,
+-			`\[Feature:UserNamespacesSupport\]`, // disabled Beta
+ 			`\[Feature:DynamicResourceAllocation\]`,
+ 			`\[Feature:VolumeAttributesClass\]`, // disabled Beta
+ 			`\[sig-cli\] Kubectl client Kubectl prune with applyset should apply and prune objects`, // Alpha feature since k8s 1.27
+ 			// 4.19
+ 			`\[Feature:PodLevelResources\]`,
+-			`\[Feature:SchedulerAsyncPreemption\]`,
+-			`\[Feature:RelaxedDNSSearchValidation\]`,
  			`\[Feature:PodLogsQuerySplitStreams\]`,
- 			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
-+			`\[Feature:OrderedNamespaceDeletion\]`, // disabled Beta
+-			`\[Feature:PodLifecycleSleepActionAllowZero\]`,
++			// 4.20
++			`\[Feature:OffByDefault\]`,
++			`\[Feature:CBOR\]`,
  		},
  		// tests for features that are not implemented in openshift
  		"[Disabled:Unimplemented]": {
-@@ -162,6 +163,9 @@ var (
+@@ -162,6 +158,9 @@ var (
  
  			// https://issues.redhat.com/browse/OCPBUGS-38839
  			`\[sig-network\] \[Feature:Traffic Distribution\] when Service has trafficDistribution=PreferClose should route traffic to an endpoint that is close to the client`,
@@ -1455,7 +1473,7 @@ index a62f99f1fd9..d8674782941 100644
  		},
  		// tests that need to be temporarily disabled while the rebase is in progress.
  		"[Disabled:RebaseInProgress]": {
-@@ -173,26 +177,6 @@ var (
+@@ -173,26 +172,6 @@ var (
  
  			// https://issues.redhat.com/browse/OCPBUGS-17194
  			`\[sig-node\] ImageCredentialProvider \[Feature:KubeletCredentialProviders\] should be able to create pod with image credentials fetched from external credential provider`,
@@ -1482,7 +1500,7 @@ index a62f99f1fd9..d8674782941 100644
  		},
  		// tests that may work, but we don't support them
  		"[Disabled:Unsupported]": {
-@@ -262,6 +246,11 @@ var (
+@@ -262,6 +241,11 @@ var (
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* UDP`,
  			`\[sig-network\] LoadBalancers \[Feature:LoadBalancer\] .* session affinity`,
  		},
@@ -1588,7 +1606,7 @@ index 8356774e726..de60ab2e273 100644
  
  	e2e.RunE2ETests(t)
 diff --git a/openshift-hack/images/hyperkube/Dockerfile.rhel b/openshift-hack/images/hyperkube/Dockerfile.rhel
-index fabdce0b9c0..81e7b885754 100644
+index fabdce0b9c0..68c9e3b673b 100644
 --- a/openshift-hack/images/hyperkube/Dockerfile.rhel
 +++ b/openshift-hack/images/hyperkube/Dockerfile.rhel
 @@ -1,17 +1,17 @@
@@ -1614,7 +1632,7 @@ index fabdce0b9c0..81e7b885754 100644
        io.openshift.tags="openshift,hyperkube" \
 -      io.openshift.build.versions="kubernetes=1.32.1"
 \ No newline at end of file
-+      io.openshift.build.versions="kubernetes=1.33.1"
++      io.openshift.build.versions="kubernetes=1.33.2"
 \ No newline at end of file
 diff --git a/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel b/openshift-hack/images/installer-kube-apiserver-artifacts/Dockerfile.rhel
 index fb57a6042fe..aae56d97e18 100644
